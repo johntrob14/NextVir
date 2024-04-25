@@ -16,15 +16,25 @@ def main(args):
     torch.cuda.empty_cache()
     
     
-    num_epochs = 1
-    batch_size = 128
-    lr = 1e-3
+    num_epochs = args.num_epochs
+    lr = args.lr
+    batch_size = args.batch_size
+    device_list = list(map(int, args.devices.split(',')))
+    main_device = 'cuda:' + str(device_list[0])
+    if args.verbose:
+        print(device_list)
+    
     for param in model.parameters():
         param.requires_grad = False
-        
-    print(model)
-    set_lora(model)
-    print(model)   
+    
+    if args.lora:
+        if args.verbose:
+            print('Pre-LoRA:')  
+            print(model)
+        set_lora(model)
+        if args.verbose:
+            print('Post-LoRA:')
+            print(model)   
      
     lora_params = [param for name, param in model.named_parameters() if 'lora' in name]                   
 
@@ -37,18 +47,24 @@ def main(args):
                 {"params" : adapter.parameters(), "lr": lr}]
                 
 
-    model = AdapterStack(model, 768, adapter).to('cuda:4')
+    model = AdapterStack(model, 768, adapter).to(main_device)
     optimizer = AdamWScheduleFree(parameters, lr=lr)
     train_loader = DataLoader(training_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-    criterion = torch.nn.CrossEntropyLoss()
-    device_list = [4,5,6,7]
+    if args.unweighted_loss:
+        criterion = torch.nn.CrossEntropyLoss()
+    else: 
+        weights = torch.ones(len(conversion))
+        totals = torch.unique(training_dataset.labels, return_counts=True)[1]
+        sum = totals.sum()
+        for i in range(len(totals)):
+            weights[i] = sum / (len(totals) * totals[i])
+        criterion = torch.nn.CrossEntropyLoss(weight=weights)
     model = torch.nn.DataParallel(model, device_ids=device_list)
     trainer = Trainer(model, optimizer, criterion, device_list)
     for i in range(num_epochs):
         trainer.train(train_loader)
         trainer.validate(val_loader)
-        trainer.save()
     data, _, (labels, _) = parse_multiclass_fa('./data/150bp_multiviral_test.fa', class_names=conversion)
     test_dataset = TokenizedDataset(data, labels, tokenizer, conversion=conversion)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
@@ -57,9 +73,13 @@ def main(args):
     
 if __name__ == '__main__':
     opt = ArgumentParser()
-    
-    
-    
-    
+    opt.add_argument('--batch_size', type=int, default=128)
+    opt.add_argument('--lr', type=float, default=1e-3)
+    opt.add_argument('--num_epochs', type=int, default=1)
+    opt.add_argument('--lora', type=bool, default=True)
+    opt.add_argument('--unweighted_loss', action='store_false')
+    opt.add_argument('--save_path', type=str, default='./models')
+    opt.add_argument('--devices', type=str, default='4,5,6,7')
+    opt.add_argument('--verbose', type=bool, default=True)
     args=opt.parse_args()
     main(args)

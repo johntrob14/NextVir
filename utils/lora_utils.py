@@ -10,6 +10,8 @@ def set_lora(model):
             register_parametrization(module, 'weight', LoRaModule(*module.weight.shape, split_dimension=3, rank=4, device=module.weight.device))
         elif isinstance(module, torch.nn.Dropout):
             module.p = 0.0
+        elif isinstance(module, torch.nn.Linear):
+            register_parametrization(module, 'weight', LoRaModule(*module.weight.shape, rank=4, device=module.weight.device))
         else:
             set_lora(module)
 
