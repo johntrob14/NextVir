@@ -8,15 +8,11 @@ class AdapterStack(nn.Module):
         self.base_model = base_model
         self.adapter = adapter
         
-    def forward(self, x):
-        x = self.base_model(x)[0]
+    def forward(self, **kwargs):
+        x = self.base_model(**kwargs)[0]
         x = x.mean(dim=1)
         x = self.adapter(x)
-        return x
-        
-        
-        
-        
+        return x     
         
 class BinClassifier(nn.Module):
     def __init__(self, input_size):
@@ -24,13 +20,11 @@ class BinClassifier(nn.Module):
         self.fc1 = nn.Linear(input_size, 64)
         self.fc2 = nn.Linear(64, 1)
         self.relu = nn.ReLU()
-        self.sigmoid = nn.Sigmoid()
     
     def forward(self, x):
         x = self.fc1(x)
         x = self.relu(x)
         x = self.fc2(x)
-        x = self.sigmoid(x)
         return x
     
 class MultiClassifier(nn.Module):

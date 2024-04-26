@@ -4,14 +4,14 @@ from schedulefree import AdamWScheduleFree
 from torch.utils.data import DataLoader
 from argparse import ArgumentParser
 from transformers import AutoTokenizer, AutoModel
-from utils import set_lora, Trainer, parse_multiclass_fa, TokenizedDataset, MultiClassifier, AdapterStack
+from utils import set_lora, BinaryTrainer, parse_multiclass_fa, TokenizedDataset, BinClassifier, AdapterStack
 
 def main(args):
     tokenizer = AutoTokenizer.from_pretrained("zhihan1996/DNABERT-S", trust_remote_code=True)
     model = AutoModel.from_pretrained("zhihan1996/DNABERT-S", trust_remote_code=True)
-    data, _, (labels, conversion) = parse_multiclass_fa('./data/150bp_multiviral_train.fa')
+    data, labels, (_, conversion) = parse_multiclass_fa('./data/150bp_multiviral_train.fa')
     training_dataset = TokenizedDataset(data, labels, tokenizer, conversion=conversion)
-    data, _, (labels, _) = parse_multiclass_fa('./data/150bp_multiviral_val.fa', class_names=conversion)
+    data, labels, (_, _) = parse_multiclass_fa('./data/150bp_multiviral_val.fa', class_names=conversion)
     val_dataset = TokenizedDataset(data, labels, tokenizer, conversion=conversion)
     torch.cuda.empty_cache()
     
@@ -42,7 +42,7 @@ def main(args):
             print(lora_params)
         
     
-    adapter = MultiClassifier(768, num_classes=len(conversion))
+    adapter = BinClassifier(768)
     
     for param in adapter.parameters():
         param.requires_grad = True    
@@ -52,33 +52,22 @@ def main(args):
                     {"params" : adapter.parameters(), "lr": lr}]
     else:
         parameters = [{"params" : adapter.parameters(), "lr": lr}]
+                
 
     model = AdapterStack(model, 768, adapter).to(main_device)
     optimizer = AdamWScheduleFree(parameters, lr=lr)
     train_loader = DataLoader(training_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-    if args.unweighted_loss:
-        criterion = torch.nn.CrossEntropyLoss()
-        if args.verbose:
-            print('Unweighted Loss')
-    else: 
-        weights = torch.ones(len(conversion))
-        totals = torch.unique(training_dataset.labels, return_counts=True)[1]
-        sum = totals.sum()
-        for i in range(len(totals)):
-            weights[i] = sum / (len(totals) * totals[i])
-        criterion = torch.nn.CrossEntropyLoss(weight=weights.to(main_device))
-        if args.verbose:
-            print('Weights:')
-            print(weights)
+    criterion = torch.nn.BCEWithLogitsLoss()
     
     if len(device_list) > 1:
         model = torch.nn.DataParallel(model, device_ids=device_list)
-    trainer = Trainer(model, optimizer, criterion, device_list)
+    trainer = BinaryTrainer(model, optimizer, criterion, device_list)
     for i in range(num_epochs):
         trainer.train(train_loader)
         trainer.validate(val_loader)
-    data, _, (labels, _) = parse_multiclass_fa('./data/150bp_multiviral_test.fa', class_names=conversion)
+        
+    data, labels, (_, _) = parse_multiclass_fa('./data/150bp_multiviral_test.fa', class_names=conversion)
     test_dataset = TokenizedDataset(data, labels, tokenizer, conversion=conversion)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     trainer.load_best()
@@ -89,15 +78,13 @@ if __name__ == '__main__':
     opt.add_argument('--batch_size', type=int, default=128)
     opt.add_argument('--lr', type=float, default=1e-3)
     opt.add_argument('--num_epochs', type=int, default=15)
-    opt.add_argument('--lora', type=bool, default=True)
-    opt.add_argument('--unweighted_loss', action='store_true')
+    opt.add_argument('--lora', type=bool, default=False)
+    opt.add_argument('--unweighted_loss', action='store_false')
     opt.add_argument('--save_path', type=str, default='./models')
     opt.add_argument('--device', type=str, default='4,5,6,7')
     opt.add_argument('--verbose', type=bool, default=True)
     args=opt.parse_args()
+    print(args.lora)
     main(args)
     
-    #TODO: add reporting for individual experiments
-    #TODO: move to DDP for multi-gpu training; should reduce overhead
-    #TODO: pass args to trainer for logging/saving
-    #TODO: Get someone to update the ROCM version (PLEASE!)
+    #TODO: merge this with the other main.py
