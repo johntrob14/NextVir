@@ -10,20 +10,25 @@ def main(args):
     
     # Initialize Tokenizer and Base Model
     tokenizer = AutoTokenizer.from_pretrained("zhihan1996/DNABERT-S", trust_remote_code=True)
-    model = AutoModel.from_pretrained("zhihan1996/DNABERT-S", trust_remote_code=True)
+    model = AutoModel.from_pretrained("zhihan1996/DNABERT-S", trust_remote_code=True)        
     
     # Parse fasta datasets
     data, bin_labels, (labels, conversion) = parse_multiclass_fa('./data/150bp_multiviral_train.fa')
-    if args.num_classes == 1:
-        training_dataset = TokenizedDataset(data, bin_labels, tokenizer, conversion=conversion)
-    else:
+    if args.num_classes > 1 or args.single_label is not None:
         training_dataset = TokenizedDataset(data, labels, tokenizer, conversion=conversion)
-    data, bin_labels, (labels, _) = parse_multiclass_fa('./data/150bp_multiviral_val.fa', class_names=conversion)
-    if args.num_classes == 1:
-        val_dataset = TokenizedDataset(data, bin_labels, tokenizer, conversion=conversion)
-        # TODO (maybe): Let the Test function in the bin trainer handle multiclass labels for class specific outputs?
+        if args.single_label is not None:
+            training_dataset.subsample_single(args.single_label)
     else:
+        training_dataset = TokenizedDataset(data, bin_labels, tokenizer, conversion=conversion)
+
+    data, bin_labels, (labels, _) = parse_multiclass_fa('./data/150bp_multiviral_val.fa', class_names=conversion)
+    if args.num_classes > 1 or args.single_label is not None:
         val_dataset = TokenizedDataset(data, labels, tokenizer, conversion=conversion)
+        if args.single_label is not None:
+            val_dataset.subsample_single(args.single_label)
+    else:
+        val_dataset = TokenizedDataset(data, bin_labels, tokenizer, conversion=conversion)
+
     torch.cuda.empty_cache()
     
     
@@ -38,8 +43,8 @@ def main(args):
     
     model, parameters = get_stack(model, args)
     
-    optimizer = AdamWScheduleFree(parameters, lr=lr, weight_decay=0.004)
-    # optimizer = AdamWScheduleFree(parameters, lr=lr)
+    # optimizer = AdamWScheduleFree(parameters, lr=lr, weight_decay=0.004)
+    optimizer = AdamWScheduleFree(parameters, lr=lr)
 
     # Loaders and criterion
     train_loader = DataLoader(training_dataset, batch_size=batch_size, shuffle=True)
@@ -61,10 +66,12 @@ def main(args):
     
     # Test
     data, bin_labels, (labels, _) = parse_multiclass_fa('./data/150bp_multiviral_test.fa', class_names=conversion)
-    if args.num_classes == 1:
-        test_dataset = TokenizedDataset(data, bin_labels, tokenizer, conversion=conversion)
-    else:
+    if args.num_classes > 1 or args.single_label is not None:
         test_dataset = TokenizedDataset(data, labels, tokenizer, conversion=conversion)
+        if args.single_label is not None:
+            test_dataset.subsample_single(args.single_label)
+    else:
+        test_dataset = TokenizedDataset(data, bin_labels, tokenizer, conversion=conversion)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     trainer.load_best()
     trainer.test(test_loader)
@@ -79,12 +86,16 @@ if __name__ == '__main__':
     opt.add_argument('--save_path', type=str, default='./models')
     opt.add_argument('--device', type=str, default='4,5,6,7')
     opt.add_argument('--verbose', type=bool, default=True) # always true right now
-    opt.add_argument('--experiment', type=str)
+    opt.add_argument('--experiment', type=str) # will add logging to this subdirectory
     opt.add_argument('--seed', type=int, default=14)
     opt.add_argument('--debug', action='store_true')
-    opt.add_argument('--num_classes', type=int, default=8)
+    opt.add_argument('--num_classes', type=int, default=8,
+                     help='Number of classes for classification - 1 for binary')
+    opt.add_argument('--single_label', type=str, default=None,
+                     help='Specify a single class for binary classification, ie "HHV-8" or "HTLV"')
     args=opt.parse_args()
-
+    if args.num_classes != 1 and args.single_label is not None:
+        raise ValueError('Cannot specify single_label with multiclass classification')
     main(args)
     
     #TODO: add logging

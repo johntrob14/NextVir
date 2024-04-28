@@ -92,6 +92,27 @@ class TokenizedDataset(torch.utils.data.Dataset):
         self.reads = torch.stack(new_reads)
         self.labels = torch.stack(new_labels)
         print(per_class_lengths)
+        
+    def subsample_single(self, label):
+        new_reads = []
+        new_labels = []
+        if label not in self.conversion:
+            raise ValueError(f'Label not found, Labels: {self.conversion}, single_label: {label}')
+        for i in range(len(self.reads)):
+            if self.labels[i] == self.conversion.index(label):
+                new_reads.append(self.reads[i])
+                new_labels.append(1.0)
+        vir_len = len(new_reads)
+        hum_len = 0
+        for i in range(len(self.reads)):
+            if self.labels[i] == 0:
+                new_reads.append(self.reads[i])
+                new_labels.append(0.0)
+                hum_len += 1
+                if hum_len >= vir_len:
+                    break
+        self.reads = torch.stack(new_reads)
+        self.labels = torch.Tensor(new_labels)
 
     def __len__(self):
         return len(self.reads)
