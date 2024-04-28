@@ -97,7 +97,9 @@ class TokenizedDataset(torch.utils.data.Dataset):
         return len(self.reads)
     
     def __getitem__(self, index):
-        return {'input_ids': self.reads[index], 'attention_mask': self.attention_mask[index]}, self.labels[index]
+        return {'input_ids': self.reads[index], 
+                'attention_mask': self.attention_mask[index],
+                'token_type_ids': self.token_type_ids[index]}, self.labels[index]
     
 
 def parse_fa(filename):

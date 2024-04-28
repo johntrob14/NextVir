@@ -3,13 +3,13 @@ from torch import nn
 from sklearn.metrics import roc_auc_score
 
 class AdapterStack(nn.Module):
-    def __init__(self, base_model, input_size, adapter):
+    def __init__(self, base_model, adapter):
         super(AdapterStack, self).__init__()
         self.base_model = base_model
         self.adapter = adapter
         
-    def forward(self, **kwargs):
-        x = self.base_model(**kwargs)[0]
+    def forward(self, input_ids, attention_mask=None, token_type_ids=None):
+        x = self.base_model(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids)[0]
         x = x.mean(dim=1)
         x = self.adapter(x)
         return x     

@@ -7,8 +7,20 @@ from torch.nn.utils.parametrize import register_parametrization
 
 from einops import rearrange
 
+def set_lora(model):
+    for name, module in model.named_children():
+        if 'Wqkv' in name:
+            register_parametrization(module, 'weight', LoRaModule(*module.weight.shape, split_dimension=3, rank=4, device=module.weight.device))
+        elif isinstance(module, torch.nn.Dropout):
+            module.p = 0.0
+        elif isinstance(module, torch.nn.Linear):
+            register_parametrization(module, 'weight', LoRaModule(*module.weight.shape, rank=4, device=module.weight.device))
+        else:
+            set_lora(module)
+
 
 # =================================================================== #
+# Adapted from https://github.com/Hprairie/finetune-clip/blob/main/open_clip/src/finetune/lora.py
 
 class LoRaModule(nn.Module):
     def __init__(self,

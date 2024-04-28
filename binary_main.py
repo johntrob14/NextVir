@@ -47,15 +47,15 @@ def main(args):
     for param in adapter.parameters():
         param.requires_grad = True    
 
-    if args.lora:
-        parameters = [{"params" : lora_params, "lr": lr/10},
+    if not args.embedding_only:
+        parameters = [{"params" : lora_params, "lr": lr/10, "warmup_steps": 500},
                     {"params" : adapter.parameters(), "lr": lr}]
     else:
         parameters = [{"params" : adapter.parameters(), "lr": lr}]
                 
 
     model = AdapterStack(model, 768, adapter).to(main_device)
-    optimizer = AdamWScheduleFree(parameters, lr=lr)
+    optimizer = AdamWScheduleFree(parameters, lr=lr, weight_decay=0.004)
     train_loader = DataLoader(training_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     criterion = torch.nn.BCEWithLogitsLoss()
@@ -78,7 +78,7 @@ if __name__ == '__main__':
     opt.add_argument('--batch_size', type=int, default=128)
     opt.add_argument('--lr', type=float, default=1e-3)
     opt.add_argument('--num_epochs', type=int, default=15)
-    opt.add_argument('--lora', type=bool, default=False)
+    opt.add_argument('--embedding_only', action='store_true')
     opt.add_argument('--unweighted_loss', action='store_false')
     opt.add_argument('--save_path', type=str, default='./models')
     opt.add_argument('--device', type=str, default='4,5,6,7')
