@@ -3,24 +3,39 @@ from tqdm import tqdm
 from torch.nn import functional as F
 from sklearn.metrics import roc_auc_score
 import os
+import wandb
 
 class Trainer():
     def __init__(self, model, optimizer, criterion, device_list, args):
-        self.save_path = os.path.join(args.save_path, args.experiment)
+        if args.experiment is not None:
+            self.save_path = os.path.join(args.save_path, args.experiment)
+        else:
+            self.save_path = args.save_path
         self.model = model
         self.optimizer = optimizer
         self.criterion = criterion
         self.device_list = device_list
         self.conversion = None
         self.epoch = 0
-        self.logging_interval = 2000
+        self.logging_interval = 200
         self.device = 'cuda:' + str(device_list[0])
         self.best_epoch = 0
         self.best_val_loss = 999
         self.debug = args.debug
+        self.num_classes = args.num_classes
+        self.args = args
+        if self.num_classes == 1:
+            self.train = self.train_binary
+            self.validate = self.validate_binary
+            self.test = self.test_binary
+            self.save_path = self.save_path + '_bin'
+        else:
+            self.train = self.train_fn
+            self.validate = self.validate_fn
+            self.test = self.test_fn
         
 
-    def train(self, train_loader):
+    def train_fn(self, train_loader):
         self.epoch += 1
         if self.conversion is None:
             self.conversion = train_loader.dataset.conversion
@@ -39,14 +54,16 @@ class Trainer():
             self.optimizer.zero_grad()
             running_loss += loss.item()
             if i % self.logging_interval == self.logging_interval - 1:
-                print(f'[{self.epoch}, {i + 1}] loss: {running_loss / self.logging_interval}')
+                wandb.log({'epoch': self.epoch,
+                           'batch': i + 1, 
+                           'training_loss': running_loss / self.logging_interval})                
                 running_loss = 0.0
             if self.debug:
                 if i == 200:
                     break
            
 
-    def test(self, test_loader):
+    def test_fn(self, test_loader):
         self.model.eval()
         self.optimizer.eval()
         correct = 0
@@ -70,14 +87,17 @@ class Trainer():
             total += len(input['input_ids'])
             correct += (predicted == batch_y).sum().item()
         print(f'Top-1 Accuracy of the network on the test set: {100 * correct / total}%')
+        wandb.log({'test_accuracy': 100 * correct / total})
         if self.conversion is not None:
             print(per_class)
             print('Per-class accuracy:')
             for key in per_class:
                 print(f'{key}: {100 * per_class[key][0] / per_class[key][1]}')
+                wandb.log({f'{key}_accuracy': 100 * per_class[key][0] / per_class[key][1]})
+            
                 
         
-    def validate(self, val_loader):
+    def validate_fn(self, val_loader):
         self.model.eval()
         self.optimizer.eval()
         correct = 0
@@ -98,42 +118,14 @@ class Trainer():
             correct += (predicted == batch_y).sum().item()
             
         print(f'Top-1 Accuracy of the network on the validation set: {100 * correct / total}%')
+        wandb.log({'validation_accuracy': 100 * correct / total,
+                   'epoch': self.epoch})
         if running_loss / total < self.best_val_loss:
             self.best_val_loss = running_loss / total
             self.best_epoch = self.epoch
             self.save_best()
-                    
-    def save(self):
-        torch.save(self.model.state_dict(), os.path.join(self.save_path, f"model_{self.epoch}.pth"))
-        
-    def save_best(self):
-        if not os.path.exists(self.save_path):
-            os.makedirs(self.save_path)
-        torch.save(self.model.state_dict(), os.path.join(self.save_path, 'best_model.pth'))
-        
-    def load(self, epoch):
-        self.model.load_state_dict(torch.load(os.path.join(self.save_path, 'model_' + str(epoch) + '.pth')))
-        
-    def load_best(self):
-        print(f'loading best model at epoch {self.best_epoch}')
-        self.model.load_state_dict(torch.load(os.path.join(self.save_path,'best_model.pth')))
-        
-class BinaryTrainer():
-    #TODO: maybe? combine this with the multiclass trainer
-    def __init__(self, model, optimizer, criterion, device_list):
-        self.model = model
-        self.optimizer = optimizer
-        self.criterion = criterion
-        self.device_list = device_list
-        self.conversion = None
-        self.epoch = 0
-        self.logging_interval = 2000
-        self.device = 'cuda:' + str(device_list[0])
-        self.best_epoch = 0
-        self.best_val_loss = 999
-        
-
-    def train(self, train_loader):
+            
+    def train_binary(self, train_loader):
         self.epoch += 1
         if self.conversion is None:
             self.conversion = train_loader.dataset.conversion
@@ -152,11 +144,14 @@ class BinaryTrainer():
             self.optimizer.zero_grad()
             running_loss += loss.item()
             if i % self.logging_interval == self.logging_interval - 1:
-                print(f'[{self.epoch}, {i + 1}] loss: {running_loss / self.logging_interval}')
+                wandb.log({'epoch': self.epoch,
+                           'batch': i + 1, 
+                           'training_loss': (running_loss / self.logging_interval)})
+                # print(f'[{self.epoch}, {i + 1}] loss: {running_loss / self.logging_interval}')
                 running_loss = 0.0
            
 
-    def test(self, test_loader):
+    def test_binary(self, test_loader):
         self.model.eval()
         self.optimizer.eval()
         correct = 0
@@ -180,10 +175,12 @@ class BinaryTrainer():
             correct += (predicted == batch_y).sum().item()
         print(f'Binary Accuracy of the network on the test set: {100 * correct / total}%')
         print(f'ROC AUC Score: {roc_auc_score(y_true, pred_probs)}')
+        wandb.log({'test_accuracy': 100 * correct / total,
+                     'roc_auc_score': roc_auc_score(y_true, pred_probs)})
         # TODO: Implement per-class accuracy on the binary set (not sur if this is actually needed)
                 
         
-    def validate(self, val_loader):
+    def validate_binary(self, val_loader):
         self.model.eval()
         self.optimizer.eval()
         correct = 0
@@ -204,21 +201,25 @@ class BinaryTrainer():
             correct += (predicted == batch_y).sum().item()
             
         print(f'Binary Accuracy of the network on the validation set: {100 * correct / total}%')
+        wandb.log({'validation_accuracy': 100 * correct / total,
+                   'epoch': self.epoch})
         if running_loss / total < self.best_val_loss:
             self.best_val_loss = running_loss / total
             self.best_epoch = self.epoch
             self.save_best()
                     
     def save(self):
-        torch.save(self.model.state_dict(), f"./models/model_{self.epoch}.pth")
+        torch.save(self.model.state_dict(), os.path.join(self.save_path, f"model_{self.epoch}.pth"))
         
     def save_best(self):
-        torch.save(self.model.state_dict(), f"./models/bin/best_adapter.pth")
+        if not os.path.exists(self.save_path):
+            os.makedirs(self.save_path)
+        torch.save(self.model.state_dict(), os.path.join(self.save_path, 'best_model.pth'))
         
     def load(self, epoch):
-        self.model.load_state_dict(torch.load('./models/model_' + str(epoch) + '.pth'))
+        self.model.load_state_dict(torch.load(os.path.join(self.save_path, 'model_' + str(epoch) + '.pth')))
         
     def load_best(self):
         print(f'loading best model at epoch {self.best_epoch}')
-        self.model.load_state_dict(torch.load('./models/bin/best_adapter.pth'))
-    
+        self.model.load_state_dict(torch.load(os.path.join(self.save_path,'best_model.pth')))
+        

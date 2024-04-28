@@ -3,7 +3,8 @@ from schedulefree import AdamWScheduleFree
 from torch.utils.data import DataLoader
 from argparse import ArgumentParser
 from transformers import AutoTokenizer, AutoModel
-from utils import BinaryTrainer, Trainer, parse_multiclass_fa, TokenizedDataset, get_stack, get_criterion
+from utils import Trainer, parse_multiclass_fa, TokenizedDataset, get_stack, get_criterion
+import wandb
 
 def main(args):
     torch.manual_seed(args.seed)
@@ -55,11 +56,7 @@ def main(args):
         model = torch.nn.DataParallel(model, device_ids=device_list)
     
     # Train and Validate
-    if args.num_classes == 1:
-        trainer = BinaryTrainer(model, optimizer, criterion, device_list)
-    else:
-        trainer = Trainer(model, optimizer, criterion, device_list, args)
-    
+    trainer = Trainer(model, optimizer, criterion, device_list, args)
     for i in range(num_epochs):
         trainer.train(train_loader)
         trainer.validate(val_loader)
@@ -96,9 +93,10 @@ if __name__ == '__main__':
     args=opt.parse_args()
     if args.num_classes != 1 and args.single_label is not None:
         raise ValueError('Cannot specify single_label with multiclass classification')
+    wandb.init(project='NextVir', config=args)
     main(args)
     
-    #TODO: add logging
+    
     #TODO: move to DDP for multi-gpu training; should reduce overhead
     #TODO: Get someone to update the ROCM version (PLEASE!)
     #TODO: add support for other datasets and parsing individual fastas

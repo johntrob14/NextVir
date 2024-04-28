@@ -20,8 +20,9 @@ def get_stack(model, args):
      
         lora_params = [param for name, param in model.named_parameters() if 'lora' in name]                   
         if args.verbose:
+            lora_names = [name for name, param in model.named_parameters() if 'lora' in name]
             print('LoRA Parameters:')
-            print(lora_params)
+            print(lora_names)
     
     #Get adapter ready
     if args.num_classes == 1:
