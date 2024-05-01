@@ -44,6 +44,11 @@ def get_stack(model, args):
 def get_criterion(args, training_dataset):
     if args.num_classes == 1:
         criterion = torch.nn.BCEWithLogitsLoss()
+        if args.one_vs_all:
+            totals = torch.unique(training_dataset.labels, return_counts=True)[1]
+            sum = totals.sum()
+            pos_weight = sum / (len(totals) * totals[1])
+            criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
         if args.verbose:
             print('Binary Classification')
     elif args.unweighted_loss:

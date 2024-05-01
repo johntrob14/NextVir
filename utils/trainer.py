@@ -87,7 +87,8 @@ class Trainer():
             total += len(input['input_ids'])
             correct += (predicted == batch_y).sum().item()
         print(f'Top-1 Accuracy of the network on the test set: {100 * correct / total}%')
-        wandb.log({'test_accuracy': 100 * correct / total})
+        wandb.log({'test_accuracy': 100 * correct / total,
+                   'best_epoch': self.best_epoch})
         if self.conversion is not None:
             print(per_class)
             print('Per-class accuracy:')
@@ -176,7 +177,8 @@ class Trainer():
         print(f'Binary Accuracy of the network on the test set: {100 * correct / total}%')
         print(f'ROC AUC Score: {roc_auc_score(y_true, pred_probs)}')
         wandb.log({'test_accuracy': 100 * correct / total,
-                     'roc_auc_score': roc_auc_score(y_true, pred_probs)})
+                     'roc_auc_score': roc_auc_score(y_true, pred_probs),
+                     'best_epoch': self.best_epoch})
         # TODO: Implement per-class accuracy on the binary set (not sur if this is actually needed)
                 
         

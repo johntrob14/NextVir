@@ -14,7 +14,7 @@ def main(args):
     model = AutoModel.from_pretrained("zhihan1996/DNABERT-S", trust_remote_code=True)        
     
     # Parse fasta datasets
-    data, bin_labels, (labels, conversion) = parse_multiclass_fa('./data/150bp_multiviral_train.fa')
+    data, bin_labels, (labels, conversion) = parse_multiclass_fa('./data/train_disjoint_fixed.fa')
     # conversion = ['HUM', 'HPV']
     # data, bin_labels = parse_HPV_fa('./data/HPV/reads_150_train.fa')
     if args.num_classes > 1 or args.single_label is not None:
@@ -28,7 +28,7 @@ def main(args):
 
     if args.verbose:
         print("training class spread: ", torch.unique(training_dataset.labels, return_counts=True))
-    data, bin_labels, (labels, _) = parse_multiclass_fa('./data/150bp_multiviral_val.fa', class_names=conversion)
+    data, bin_labels, (labels, _) = parse_multiclass_fa('./data/val_disjoint_fixed.fa', class_names=conversion)
     # data, bin_labels = parse_HPV_fa('./data/HPV/reads_150_valid.fa')
     if args.num_classes > 1 or args.single_label is not None:
         val_dataset = TokenizedDataset(data, labels, tokenizer, conversion=conversion)
@@ -70,7 +70,7 @@ def main(args):
         trainer.validate(val_loader)
     
     # Test
-    data, bin_labels, (labels, _) = parse_multiclass_fa('./data/150bp_multiviral_test.fa', class_names=conversion)
+    data, bin_labels, (labels, _) = parse_multiclass_fa('./data/test_disjoint_fixed.fa', class_names=conversion)
     # data, bin_labels = parse_HPV_fa('./data/HPV/reads_150_test.fa')
     if args.num_classes > 1 or args.single_label is not None:
         test_dataset = TokenizedDataset(data, labels, tokenizer, conversion=conversion)

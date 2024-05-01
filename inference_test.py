@@ -5,6 +5,7 @@ from argparse import ArgumentParser
 from transformers import AutoTokenizer, AutoModel
 from utils import Trainer, parse_multiclass_fa, parse_HPV_fa, TokenizedDataset, get_stack, get_criterion
 import wandb
+from torch.nn import functional as F
 
 def main(args):
     torch.manual_seed(args.seed)
@@ -17,28 +18,7 @@ def main(args):
     data, bin_labels, (labels, conversion) = parse_multiclass_fa('./data/150bp_multiviral_train.fa')
     # conversion = ['HUM', 'HPV']
     # data, bin_labels = parse_HPV_fa('./data/HPV/reads_150_train.fa')
-    if args.num_classes > 1 or args.single_label is not None:
-        training_dataset = TokenizedDataset(data, labels, tokenizer, conversion=conversion)
-        if args.single_label is not None and not args.one_vs_all:
-            training_dataset.subsample_single(args.single_label)
-        elif args.single_label is not None and args.one_vs_all:
-            training_dataset.subsample_one_vs_all(args.single_label)
-    else:
-        training_dataset = TokenizedDataset(data, bin_labels, tokenizer, conversion=conversion)
-
-    if args.verbose:
-        print("training class spread: ", torch.unique(training_dataset.labels, return_counts=True))
-    data, bin_labels, (labels, _) = parse_multiclass_fa('./data/150bp_multiviral_val.fa', class_names=conversion)
-    # data, bin_labels = parse_HPV_fa('./data/HPV/reads_150_valid.fa')
-    if args.num_classes > 1 or args.single_label is not None:
-        val_dataset = TokenizedDataset(data, labels, tokenizer, conversion=conversion)
-        if args.single_label is not None and not args.one_vs_all:
-            val_dataset.subsample_single(args.single_label)
-        elif args.single_label is not None and args.one_vs_all:
-            val_dataset.subsample_one_vs_all(args.single_label)
-    else:
-        val_dataset = TokenizedDataset(data, bin_labels, tokenizer, conversion=conversion)
-
+    
     torch.cuda.empty_cache()
     
     
@@ -53,35 +33,59 @@ def main(args):
     
     model, parameters = get_stack(model, args)
     
-    optimizer = AdamWScheduleFree(parameters, lr=lr, weight_decay=0.004)
-
+    print('model_got')
     # Loaders and criterion
-    train_loader = DataLoader(training_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-    criterion = get_criterion(args, training_dataset)
     
     if len(device_list) > 1:
         model = torch.nn.DataParallel(model, device_ids=device_list)
-    
+    model.load_state_dict(torch.load('./models/HHV-8_vs_all_bin/best_model.pth'))
+    print('model_loaded')
     # Train and Validate
-    trainer = Trainer(model, optimizer, criterion, device_list, args)
-    for i in range(num_epochs):
-        trainer.train(train_loader)
-        trainer.validate(val_loader)
+    # trainer = Trainer(model, optimizer, criterion, device_list, args)
+    # for i in range(num_epochs):
+    #     trainer.train(train_loader)
+    #     trainer.validate(val_loader)
     
     # Test
     data, bin_labels, (labels, _) = parse_multiclass_fa('./data/150bp_multiviral_test.fa', class_names=conversion)
-    # data, bin_labels = parse_HPV_fa('./data/HPV/reads_150_test.fa')
-    if args.num_classes > 1 or args.single_label is not None:
-        test_dataset = TokenizedDataset(data, labels, tokenizer, conversion=conversion)
-        if args.single_label is not None:
-            test_dataset.subsample_single(args.single_label)
-    else:
-        test_dataset = TokenizedDataset(data, bin_labels, tokenizer, conversion=conversion)
+    test_dataset = TokenizedDataset(data, labels, tokenizer, conversion=conversion)
+    test_dataset.subsample_one_vs_all = one_class_subsample_one_vs_all
+    test_dataset.subsample_one_vs_all(test_dataset, args.single_label)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
-    trainer.load_best()
-    trainer.test(test_loader)
+    acc_test_binary(model, args.main_device, test_loader)
     
+def one_class_subsample_one_vs_all(self, label):
+    new_reads = []
+    for i in range(len(self.labels)):
+        if self.labels[i] == self.conversion.index(label):
+            new_reads.append(self.reads[i])
+    self.reads = torch.stack(new_reads)
+    self.labels = torch.ones(len(new_reads))
+
+    
+def acc_test_binary(model, main_device, test_loader):
+    model.eval()
+    correct = 0
+    total = 0
+    pred_probs = []
+    y_true = [] 
+    for batch in test_loader:
+        input = batch[0]
+        for key in input:
+            input[key] = input[key].to(main_device)
+        labels = batch[1].to(main_device)
+        outputs = model(input_ids=input['input_ids'], attention_mask=input['attention_mask'], token_type_ids=input['token_type_ids']).squeeze()
+        pred_prob = F.sigmoid(outputs)
+        predicted = torch.tensor([1 if pred_prob[i] > 0.5 else 0 for i in range(len(pred_prob))]).to(main_device)
+        batch_y = labels
+        y_true.extend(batch_y.tolist())
+        pred_probs.extend(pred_prob.tolist())
+        total += len(labels)
+        correct += (predicted == batch_y).sum().item()
+    print(f'Binary Accuracy of the network on the test set: {100 * correct / total}%')
+    wandb.log({'test_accuracy': 100 * correct / total})
+    # TODO: Implement per-class accuracy on the binary set (not sur if this is actually needed)
+
 if __name__ == '__main__':
     opt = ArgumentParser()
     opt.add_argument('--batch_size', type=int, default=128)

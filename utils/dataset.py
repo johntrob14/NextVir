@@ -113,6 +113,13 @@ class TokenizedDataset(torch.utils.data.Dataset):
                     break
         self.reads = torch.stack(new_reads)
         self.labels = torch.Tensor(new_labels)
+        
+    def subsample_one_vs_all(self, label):
+        for i in range(len(self.labels)):
+            if self.labels[i] == self.conversion.index(label):
+                self.labels[i] = 1.0
+            else:
+                self.labels[i] = 0.0
 
     def __len__(self):
         return len(self.reads)
@@ -130,6 +137,20 @@ def parse_fa(filename):
         for line in f:
             if line.startswith('>'):
                 labels.append(line.strip())
+            else:
+                data.append(line.strip())
+    return data, labels
+
+def parse_HPV_fa(filename):
+    data = []
+    labels = []
+    with open(filename) as f:
+        for line in f:
+            if line.startswith('>'):
+                if line.startswith('>HPV'):
+                    labels.append(1)
+                else:
+                    labels.append(0)
             else:
                 data.append(line.strip())
     return data, labels
@@ -166,19 +187,6 @@ def save_embedding_dataset(args):
             data, labels, (multiclass_labels, class_names) = parse_multiclass_fa(args.filename + version, class_names=class_names)
             dataset = EmbedDataset(data, multiclass_labels, tokenizer, model, conversion=class_names)
         with open(args.filename + '_' + args.task + version.replace('.fa','') + '_embed_dataset.pkl', 'wb') as f:
-            pickle.dump(dataset, f)
-            
-def save_tokenized_dataset(args):
-    tokenizer = AutoTokenizer.from_pretrained("zhihan1996/DNABERT-S", trust_remote_code=True)
-    class_names = ['HUM']
-    for version in ['_train.fa', '_val.fa', '_test.fa']:
-        if args.task == 'binary':
-            data, labels, (_, _) = parse_multiclass_fa(args.filename + version)
-            dataset = TokenizedDataset(data, labels, tokenizer)
-        elif args.task == 'multi':
-            data, labels, (multiclass_labels, class_names) = parse_multiclass_fa(args.filename + version, class_names=class_names)
-            dataset = TokenizedDataset(data, multiclass_labels, tokenizer, conversion=class_names)
-        with open(args.filename + '_' + args.task + version.replace('.fa','') + '_tokenized_dataset.pkl', 'wb') as f:
             pickle.dump(dataset, f)
             
 def load_dataset(filename):
