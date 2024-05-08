@@ -1,7 +1,7 @@
 import torch
 from tqdm import tqdm
 from torch.nn import functional as F
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import roc_auc_score, confusion_matrix
 import os
 import wandb
 
@@ -28,7 +28,6 @@ class Trainer():
             self.train = self.train_binary
             self.validate = self.validate_binary
             self.test = self.test_binary
-            self.save_path = self.save_path + '_bin'
         else:
             self.train = self.train_fn
             self.validate = self.validate_fn
@@ -86,6 +85,7 @@ class Trainer():
                         per_class[self.conversion[batch_y[i]]][0] += 1
             total += len(input['input_ids'])
             correct += (predicted == batch_y).sum().item()
+        
         print(f'Top-1 Accuracy of the network on the test set: {100 * correct / total}%')
         wandb.log({'test_accuracy': 100 * correct / total,
                    'best_epoch': self.best_epoch})
@@ -120,6 +120,7 @@ class Trainer():
             
         print(f'Top-1 Accuracy of the network on the validation set: {100 * correct / total}%')
         wandb.log({'validation_accuracy': 100 * correct / total,
+                   'validation_loss' : running_loss / total,
                    'epoch': self.epoch})
         if running_loss / total < self.best_val_loss:
             self.best_val_loss = running_loss / total
@@ -139,6 +140,11 @@ class Trainer():
             for key in input.keys():
                 input[key] = input[key].to(self.device)
             outputs = self.model(input_ids=input['input_ids'], attention_mask=input['attention_mask'], token_type_ids=input['token_type_ids']).squeeze()
+            if outputs.size() != labels.size():
+                print('squeezed labels')
+                labels = labels.squeeze()
+                if outputs.size() != labels.size():
+                    print('failed')
             loss = self.criterion(outputs, labels)
             loss.backward()
             self.optimizer.step()
@@ -159,6 +165,7 @@ class Trainer():
         total = 0
         pred_probs = []
         y_true = []
+        preds = []
         if self.conversion is not None:
             per_class = {self.conversion[i] : [0, 0] for i in range(len(self.conversion))}    
         for batch in test_loader:
@@ -172,12 +179,16 @@ class Trainer():
             batch_y = labels
             y_true.extend(batch_y.tolist())
             pred_probs.extend(pred_prob.tolist())
+            preds.extend(predicted.tolist())
             total += len(labels)
             correct += (predicted == batch_y).sum().item()
         print(f'Binary Accuracy of the network on the test set: {100 * correct / total}%')
         print(f'ROC AUC Score: {roc_auc_score(y_true, pred_probs)}')
+        cm = confusion_matrix(y_true, preds)
         wandb.log({'test_accuracy': 100 * correct / total,
                      'roc_auc_score': roc_auc_score(y_true, pred_probs),
+                     'TPR': cm[1][1] / (cm[1][1] + cm[1][0]),
+                     'FPR': cm[0][1] / (cm[0][1] + cm[0][0]),
                      'best_epoch': self.best_epoch})
         # TODO: Implement per-class accuracy on the binary set (not sur if this is actually needed)
                 
@@ -204,6 +215,7 @@ class Trainer():
             
         print(f'Binary Accuracy of the network on the validation set: {100 * correct / total}%')
         wandb.log({'validation_accuracy': 100 * correct / total,
+                   'validation_loss' : running_loss / total,
                    'epoch': self.epoch})
         if running_loss / total < self.best_val_loss:
             self.best_val_loss = running_loss / total

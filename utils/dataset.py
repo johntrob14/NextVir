@@ -93,25 +93,55 @@ class TokenizedDataset(torch.utils.data.Dataset):
         self.labels = torch.stack(new_labels)
         print(per_class_lengths)
         
+    def remove_single(self, label):
+        new_reads = []
+        new_token_type_ids = []
+        new_attention_mask = []
+        new_labels = []
+        num_removed = 0
+        if label not in self.conversion:
+            raise ValueError(f'Label not found, Labels: {self.conversion}, single_label: {label}')
+        for i in range(len(self.reads)):
+            if self.labels[i] != self.conversion.index(label):
+                new_reads.append(self.reads[i])
+                new_attention_mask.append(self.attention_mask[i])
+                new_token_type_ids.append(self.token_type_ids[i])
+                new_labels.append(0.0 if self.labels[i] == 0 else 1.0)
+            else:
+                num_removed += 1
+        print(num_removed)
+        self.reads = torch.stack(new_reads)
+        self.attention_mask = torch.stack(new_attention_mask)
+        self.token_type_ids = torch.stack(new_token_type_ids)
+        self.labels = torch.Tensor(new_labels)
+        
     def subsample_single(self, label):
         new_reads = []
+        new_token_type_ids = []
+        new_attention_mask = []
         new_labels = []
         if label not in self.conversion:
             raise ValueError(f'Label not found, Labels: {self.conversion}, single_label: {label}')
         for i in range(len(self.reads)):
             if self.labels[i] == self.conversion.index(label):
                 new_reads.append(self.reads[i])
+                new_attention_mask.append(self.attention_mask[i])
+                new_token_type_ids.append(self.token_type_ids[i])
                 new_labels.append(1.0)
         vir_len = len(new_reads)
         hum_len = 0
         for i in range(len(self.reads)):
             if self.labels[i] == 0:
                 new_reads.append(self.reads[i])
+                new_attention_mask.append(self.attention_mask[i])
+                new_token_type_ids.append(self.token_type_ids[i])
                 new_labels.append(0.0)
                 hum_len += 1
                 if hum_len >= vir_len:
                     break
         self.reads = torch.stack(new_reads)
+        self.attention_mask = torch.stack(new_attention_mask)
+        self.token_type_ids = torch.stack(new_token_type_ids)
         self.labels = torch.Tensor(new_labels)
         
     def subsample_one_vs_all(self, label):
@@ -120,6 +150,20 @@ class TokenizedDataset(torch.utils.data.Dataset):
                 self.labels[i] = 1.0
             else:
                 self.labels[i] = 0.0
+                
+    def one_class_subsample(self, label):
+        new_reads = []
+        new_attention_mask = []
+        new_token_type_ids = []
+        for i in range(len(self.labels)):
+            if self.labels[i] == self.conversion.index(label):
+                new_reads.append(self.reads[i])
+                new_attention_mask.append(self.attention_mask[i])
+                new_token_type_ids.append(self.token_type_ids[i])
+        self.reads = torch.stack(new_reads)
+        self.attention_mask = torch.stack(new_attention_mask)
+        self.token_type_ids = torch.stack(new_token_type_ids)
+        self.labels = torch.ones(len(new_reads))
 
     def __len__(self):
         return len(self.reads)

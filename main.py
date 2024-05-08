@@ -52,8 +52,10 @@ def main(args):
         print(device_list)
     
     model, parameters = get_stack(model, args)
-    
-    optimizer = AdamWScheduleFree(parameters, lr=lr, weight_decay=0.004)
+    warmup_step_rate = 0.4
+    warmup_steps = int(len(training_dataset) // batch_size * warmup_step_rate)
+    print('warmup_steps: ', warmup_steps)
+    optimizer = AdamWScheduleFree(parameters, lr=lr, warmup_steps=warmup_steps)
 
     # Loaders and criterion
     train_loader = DataLoader(training_dataset, batch_size=batch_size, shuffle=True)
@@ -110,3 +112,5 @@ if __name__ == '__main__':
     #TODO: move to DDP for multi-gpu training; should reduce overhead
     #TODO: Get someone to update the ROCM version (PLEASE!)
     #TODO: add support for other datasets and parsing individual fastas
+    #TODO: combine other mains here
+    #TODO: make inference_test more modular

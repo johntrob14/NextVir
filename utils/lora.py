@@ -14,6 +14,8 @@ def set_lora(model):
         elif isinstance(module, torch.nn.Dropout):
             module.p = 0.0
         elif isinstance(module, torch.nn.Linear):
+            if 'pooler' in name:
+                continue
             register_parametrization(module, 'weight', LoRaModule(*module.weight.shape, rank=4, device=module.weight.device))
         else:
             set_lora(module)

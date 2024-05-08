@@ -34,7 +34,7 @@ def get_stack(model, args):
 
     # Configure Optimizer and stack the encoder with the adapter
     if not args.embedding_only:
-        parameters = [{"params" : lora_params, "lr": args.lr/10, 'warmup_steps': 1000},
+        parameters = [{"params" : lora_params, "lr": args.lr/10},
                     {"params" : adapter.parameters(), "lr": args.lr}]
     else:
         parameters = [{"params" : adapter.parameters(), "lr": args.lr}]

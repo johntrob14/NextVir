@@ -5,7 +5,7 @@ from argparse import ArgumentParser
 from transformers import AutoTokenizer, AutoModel
 from utils import Trainer, parse_multiclass_fa, parse_HPV_fa, TokenizedDataset, get_stack, get_criterion
 import wandb
-from torch.nn import functional as F
+import numpy as np
 
 def main(args):
     torch.manual_seed(args.seed)
@@ -16,9 +16,37 @@ def main(args):
     
     # Parse fasta datasets
     data, bin_labels, (labels, conversion) = parse_multiclass_fa('./data/150bp_multiviral_train.fa')
-    # conversion = ['HUM', 'VIR']
+    # conversion = ['HUM', 'HPV']
     # data, bin_labels = parse_HPV_fa('./data/HPV/reads_150_train.fa')
-    
+    if args.num_classes > 1 or args.single_label is not None:
+        training_dataset = TokenizedDataset(data, labels, tokenizer, conversion=conversion)
+        if args.single_label is not None and args.remove_single:
+            print(len(training_dataset))
+            training_dataset.remove_single(args.single_label)
+            print(len(training_dataset))
+            print(torch.unique(training_dataset.labels, return_counts=True))
+        elif args.single_label is not None and not args.one_vs_all:
+            training_dataset.subsample_single(args.single_label)
+        elif args.single_label is not None and args.one_vs_all:
+            training_dataset.subsample_one_vs_all(args.single_label)
+    else:
+        training_dataset = TokenizedDataset(data, bin_labels, tokenizer, conversion=conversion)
+
+    if args.verbose:
+        print("training class spread: ", torch.unique(training_dataset.labels, return_counts=True))
+    data, bin_labels, (labels, _) = parse_multiclass_fa('./data/150bp_multiviral_val.fa', class_names=conversion)
+    # data, bin_labels = parse_HPV_fa('./data/HPV/reads_150_valid.fa')
+    if args.num_classes > 1 or args.single_label is not None:
+        val_dataset = TokenizedDataset(data, labels, tokenizer, conversion=conversion)
+        if args.single_label is not None and args.remove_single:
+            val_dataset.remove_single(args.single_label) # ? maybe I leave it in?
+        elif args.single_label is not None and not args.one_vs_all:
+            val_dataset.subsample_single(args.single_label)
+        elif args.single_label is not None and args.one_vs_all:
+            val_dataset.subsample_one_vs_all(args.single_label)
+    else:
+        val_dataset = TokenizedDataset(data, bin_labels, tokenizer, conversion=conversion)
+
     torch.cuda.empty_cache()
     
     
@@ -33,56 +61,35 @@ def main(args):
     
     model, parameters = get_stack(model, args)
     
-    print('model_got')
+    optimizer = AdamWScheduleFree(parameters, lr=lr, weight_decay=0.004)
+
     # Loaders and criterion
+    train_loader = DataLoader(training_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    criterion = get_criterion(args, training_dataset)
     
     if len(device_list) > 1:
         model = torch.nn.DataParallel(model, device_ids=device_list)
-    model.load_state_dict(torch.load('./models/binary_lora_bin/best_model.pth'))
-    print('model_loaded')
+    
     # Train and Validate
-    # trainer = Trainer(model, optimizer, criterion, device_list, args)
-    # for i in range(num_epochs):
-    #     trainer.train(train_loader)
-    #     trainer.validate(val_loader)
+    trainer = Trainer(model, optimizer, criterion, device_list, args)
+    for i in range(num_epochs):
+        trainer.train(train_loader)
+        trainer.validate(val_loader)
     
     # Test
     data, bin_labels, (labels, _) = parse_multiclass_fa('./data/150bp_multiviral_test.fa', class_names=conversion)
-    test_dataset = TokenizedDataset(data, bin_labels, tokenizer, conversion=conversion)
-    print(len(test_dataset))
-
-    test_dataset.conversion = ['HUM', 'VIR']
-    test_dataset.one_class_subsample(args.single_label)
-    print(len(test_dataset))
+    # data, bin_labels = parse_HPV_fa('./data/HPV/reads_150_test.fa')
+    if args.num_classes > 1 or args.single_label is not None:
+        test_dataset = TokenizedDataset(data, labels, tokenizer, conversion=conversion)
+        if args.single_label is not None:
+            test_dataset.subsample_single(args.single_label)
+    else:
+        test_dataset = TokenizedDataset(data, bin_labels, tokenizer, conversion=conversion)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
-    acc_test_binary(model, args.main_device, test_loader, args)
+    trainer.load_best()
+    trainer.test(test_loader)
     
-
-
-    
-def acc_test_binary(model, main_device, test_loader, args):
-    model.eval()
-    correct = 0
-    total = 0
-    pred_probs = []
-    y_true = [] 
-    for batch in test_loader:
-        input = batch[0]
-        for key in input:
-            input[key] = input[key].to(main_device)
-        labels = batch[1].to(main_device)
-        outputs = model(input_ids=input['input_ids'], attention_mask=input['attention_mask'], token_type_ids=input['token_type_ids']).squeeze()
-        pred_prob = F.sigmoid(outputs)
-        predicted = torch.tensor([1 if pred_prob[i] > 0.5 else 0 for i in range(len(pred_prob))]).to(main_device)
-        batch_y = labels
-        y_true.extend(batch_y.tolist())
-        pred_probs.extend(pred_prob.tolist())
-        total += len(labels)
-        correct += (predicted == batch_y).sum().item()
-    print(f'Binary Accuracy of the network on the test set: {100 * correct / total}%')
-    if not args.disable_wandb:
-        wandb.log({'test_accuracy': 100 * correct / total})
-
 if __name__ == '__main__':
     opt = ArgumentParser()
     opt.add_argument('--batch_size', type=int, default=128)
@@ -96,20 +103,18 @@ if __name__ == '__main__':
     opt.add_argument('--experiment', type=str) # will add logging to this subdirectory
     opt.add_argument('--seed', type=int, default=14)
     opt.add_argument('--debug', action='store_true')
-    opt.add_argument('--disable_wandb', action='store_true')
     opt.add_argument('--num_classes', type=int, default=8,
                      help='Number of classes for classification - 1 for binary')
     opt.add_argument('--single_label', type=str, default=None,
                      help='Specify a single class for binary classification, ie "HHV-8" or "HTLV"')
     opt.add_argument('--one_vs_all', action='store_true')
+    opt.add_argument('--remove_single', action='store_true')
     args=opt.parse_args()
     if args.num_classes != 1 and args.single_label is not None:
         raise ValueError('Cannot specify single_label with multiclass classification')
-    args.disable_wandb = True
-    if not args.disable_wandb:
-        wandb.init(project='NextVir', name=args.experiment, config=args)
+    wandb.init(project='NextVir', name=args.experiment, config=args)
     main(args)
-    
+    print(args.remove_single)
     
     #TODO: move to DDP for multi-gpu training; should reduce overhead
     #TODO: Get someone to update the ROCM version (PLEASE!)
