@@ -237,6 +237,49 @@ def load_dataset(filename):
     with open(filename, 'rb') as f:
         return pickle.load(f)
     
+def parse_dataset(args, tokenizer, mode: str = 'train'):
+    # Parse fasta datasets
+    if mode == 'train':
+        data, bin_labels, (labels, conversion) = parse_multiclass_fa(args.train_path)
+        # conversion = ['HUM', 'HPV']
+        # data, bin_labels = parse_HPV_fa('./data/HPV/reads_150_train.fa')
+        #TODO -- add support for other datasets, file paths
+        dataset = None
+        if not args.test:
+            if args.num_classes > 1 or args.single_label is not None:
+                dataset = TokenizedDataset(data, labels, tokenizer, conversion=conversion)
+                if args.single_label is not None and not args.one_vs_all:
+                    dataset.subsample_single(args.single_label)
+                elif args.single_label is not None and args.one_vs_all:
+                    dataset.subsample_one_vs_all(args.single_label)
+            else:
+                dataset = TokenizedDataset(data, bin_labels, tokenizer, conversion=conversion)
+            print("training class spread: ", torch.unique(dataset.labels, return_counts=True))
+        args.conversion = conversion
+    elif mode == 'val':
+        conversion = args.conversion
+        data, bin_labels, (labels, _) = parse_multiclass_fa(args.val_path, class_names=conversion)
+        # data, bin_labels = parse_HPV_fa('./data/HPV/reads_150_valid.fa')
+        if args.num_classes > 1 or args.single_label is not None:
+            dataset = TokenizedDataset(data, labels, tokenizer, conversion=conversion)
+            if args.single_label is not None and not args.one_vs_all:
+                dataset.subsample_single(args.single_label)
+            elif args.single_label is not None and args.one_vs_all:
+                dataset.subsample_one_vs_all(args.single_label)
+        else:
+            dataset = TokenizedDataset(data, bin_labels, tokenizer, conversion=conversion)
+    elif mode == 'test':
+        conversion = args.conversion
+        # this is where I'll have to add a bit of extra functionality
+        data, bin_labels, (labels, _) = parse_multiclass_fa(args.test_path, class_names=conversion)
+        # data, bin_labels = parse_HPV_fa('./data/HPV/reads_150_test.fa')
+        if args.num_classes > 1 or args.single_label is not None:
+            dataset = TokenizedDataset(data, labels, tokenizer, conversion=conversion)
+            if args.single_label is not None:
+                dataset.subsample_single(args.single_label)
+        else:
+            dataset = TokenizedDataset(data, bin_labels, tokenizer, conversion=conversion)
+    return dataset
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('--dir', type=str, default='./data/')
@@ -245,8 +288,6 @@ if __name__ == '__main__':
     parser.add_argument('--embedding', action='store_true')
     parser.add_argument('--tokenized', action='store_true')
     args = parser.parse_args()
-    if args.tokenized:
-        save_tokenized_dataset(args)
     if args.embedding:
         save_embedding_dataset(args)
         

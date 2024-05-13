@@ -118,4 +118,5 @@ if __name__ == '__main__':
     
     #TODO: move to DDP for multi-gpu training; should reduce overhead
     #TODO: Get someone to update the ROCM version (PLEASE!)
-    #TODO: add support for other datasets and parsing individual fastas
+    #TODO: parsing individual fastas
+    #TODO --remove_single for discover

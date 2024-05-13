@@ -1,6 +1,7 @@
 import torch
 from utils import set_lora, MultiClassifier, BinClassifier, AdapterStack
-
+from argparse import ArgumentParser
+import wandb
 
 def get_stack(model, args):
     # Disable gradients in base model
@@ -34,7 +35,7 @@ def get_stack(model, args):
 
     # Configure Optimizer and stack the encoder with the adapter
     if not args.embedding_only:
-        parameters = [{"params" : lora_params, "lr": args.lr/10},
+        parameters = [{"params" : lora_params, "lr": args.lr},
                     {"params" : adapter.parameters(), "lr": args.lr}]
     else:
         parameters = [{"params" : adapter.parameters(), "lr": args.lr}]
@@ -66,3 +67,45 @@ def get_criterion(args, training_dataset):
             print('Loss Weights:')
             print(weights)
     return criterion
+
+def parse_args(opt: ArgumentParser):
+    opt.add_argument('--beta', type=float, default=0.9)
+    opt.add_argument('--weight_decay', type=float, default=0.005)
+    opt.add_argument('--batch_size', type=int, default=128)
+    opt.add_argument('--lr', type=float, default=1e-3)
+    opt.add_argument('--num_epochs', type=int, default=15)
+    opt.add_argument('--embedding_only', action='store_true')
+    opt.add_argument('--unweighted_loss', action='store_true')
+    opt.add_argument('--save_path', type=str, default='./models')
+    opt.add_argument('--device', type=str, default='4,5,6,7')
+    opt.add_argument('--verbose', type=bool, default=True) # always true right now
+    opt.add_argument('--experiment', type=str) # will add logging to this subdirectory
+    opt.add_argument('--seed', type=int, default=14)
+    opt.add_argument('--debug', action='store_true')
+    opt.add_argument('--num_classes', type=int, default=8,
+                     help='Number of classes for classification - 1 for binary')
+    opt.add_argument('--single_label', type=str, default=None,
+                     help='Specify a single class for binary classification, ie "HHV-8" or "HTLV"')
+    opt.add_argument('--one_vs_all', action='store_true')
+    opt.add_argument('--test', action='store_true')
+    opt.add_argument('-i', '--train_path', type=str, default='./data/150bp_multiviral_train.fa')
+    opt.add_argument('-v', '--val_path', type=str, default='./data/150bp_multiviral_val.fa')
+    opt.add_argument('-t', '--test_path', type=str, default='./data/150bp_multiviral_test.fa')
+    opt.add_argument('-m', '--model_path', type=str, default='./models/best_model.pth')
+    args=opt.parse_args()
+    config = {
+        'device': args.device,
+        'beta': args.beta,
+        'weight_decay': args.weight_decay,
+        'lr': args.lr,
+        'num_classes': args.num_classes,
+        'single_label': args.single_label,
+        'embedding_only': args.embedding_only,
+    }
+    if args.weight_decay == 0:
+        config['weight_decay'] = 'None'
+        args.weight_decay = int(0)
+    if args.num_classes != 1 and args.single_label is not None:
+        raise ValueError('Cannot specify single_label with multiclass classification')
+    wandb.init(project='NextVir', name=args.experiment, config=config)
+    return args

@@ -4,6 +4,15 @@ from torch.nn import functional as F
 from sklearn.metrics import roc_auc_score, confusion_matrix
 import os
 import wandb
+class dummy_optimizer():
+    def __init__(self):
+        pass
+    
+    def eval(self):
+        pass
+    
+    def train(self):
+        pass
 
 class Trainer():
     def __init__(self, model, optimizer, criterion, device_list, args):
@@ -13,6 +22,9 @@ class Trainer():
             self.save_path = args.save_path
         self.model = model
         self.optimizer = optimizer
+        if optimizer is None:
+            self.optimizer = dummy_optimizer() # dummy optimizer for inference
+        
         self.criterion = criterion
         self.device_list = device_list
         self.conversion = None
