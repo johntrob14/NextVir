@@ -9,8 +9,15 @@ class AdapterStack(nn.Module):
         self.adapter = adapter
         
     def forward(self, input_ids, attention_mask=None, token_type_ids=None):
-        x = self.base_model(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids)[0]
-        x = x.mean(dim=1)
+        x = self.base_model(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids)[0] # D-S
+        # x = self.base_model(input_ids=input_ids, attention_mask=attention_mask, encoder_attention_mask=attention_mask, output_hidden_states=True)['hidden_states'][-1] NT
+        # x = self.base_model(input_ids=input_ids, output_hidden_states=True)['hidden_states'][-1] # H-DNA
+        attention_mask = torch.unsqueeze(attention_mask, dim=-1)
+
+        # Compute mean embeddings per sequence
+        x = torch.sum(attention_mask*x, axis=-2)/torch.sum(attention_mask, axis=1)
+        # x = x.mean(dim=1)
+        # x = x.mean(dim=1)
         x = self.adapter(x)
         return x     
         

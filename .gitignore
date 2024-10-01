@@ -3,6 +3,9 @@ models/
 !models/best_model.pth
 wandb/
 *.sh
-
+*.npy
+*.csv
+*.npz
+*.png
 data/
 !data/*.sh

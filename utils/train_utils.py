@@ -28,8 +28,12 @@ def get_stack(model, args):
     #Get adapter ready
     if args.num_classes == 1:
         adapter = BinClassifier(768)
+        # adapter = BinClassifier(1024)
+        # adapter = BinClassifier(256)
     else:
         adapter = MultiClassifier(768, num_classes=args.num_classes)
+        # adapter = MultiClassifier(1024, num_classes=args.num_classes)
+        # adapter = MultiClassifier(256, num_classes=args.num_classes)
     for param in adapter.parameters():
         param.requires_grad = True    
 
@@ -69,7 +73,7 @@ def get_criterion(args, training_dataset):
     return criterion
 
 def parse_args(opt: ArgumentParser):
-    opt.add_argument('--beta', type=float, default=0.9)
+    opt.add_argument('--beta', type=float, default=0.85)
     opt.add_argument('--weight_decay', type=float, default=0.005)
     opt.add_argument('--batch_size', type=int, default=128)
     opt.add_argument('--lr', type=float, default=1e-3)
@@ -78,10 +82,12 @@ def parse_args(opt: ArgumentParser):
     opt.add_argument('--unweighted_loss', action='store_true')
     opt.add_argument('--save_path', type=str, default='./models')
     opt.add_argument('--device', type=str, default='4,5,6,7')
+    opt.add_argument('--remove_single', action='store_true', help='Remove single class from train/val dataset')
     opt.add_argument('--verbose', type=bool, default=True) # always true right now
     opt.add_argument('--experiment', type=str) # will add logging to this subdirectory
     opt.add_argument('--seed', type=int, default=14)
     opt.add_argument('--debug', action='store_true')
+    opt.add_argument('--tag', type=str, default=None)
     opt.add_argument('--num_classes', type=int, default=8,
                      help='Number of classes for classification - 1 for binary')
     opt.add_argument('--single_label', type=str, default=None,
@@ -107,5 +113,8 @@ def parse_args(opt: ArgumentParser):
         args.weight_decay = int(0)
     if args.num_classes != 1 and args.single_label is not None:
         raise ValueError('Cannot specify single_label with multiclass classification')
-    wandb.init(project='NextVir', name=args.experiment, config=config)
+    if args.tag is not None:
+        wandb.init(project='NextVir', name=args.experiment, config=config, tags=[args.tag])
+    else:
+        wandb.init(project='NextVir', name=args.experiment, config=config)
     return args

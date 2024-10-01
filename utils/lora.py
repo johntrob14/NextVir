@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch.nn.utils.parametrize import register_parametrization
 
 from einops import rearrange
-
+#TODO: Add support for command line rank change
 def set_lora(model):
     for name, module in model.named_children():
         if 'Wqkv' in name:

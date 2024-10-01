@@ -33,6 +33,7 @@ class Trainer():
         self.device = 'cuda:' + str(device_list[0])
         self.best_epoch = 0
         self.best_val_loss = 999
+        self.epochs_since_best = 0
         self.debug = args.debug
         self.num_classes = args.num_classes
         self.args = args
@@ -54,11 +55,17 @@ class Trainer():
         self.optimizer.train()
         running_loss = 0.0
         for i, batch in enumerate(tqdm(train_loader)):
+            if self.debug:
+                if i >= 20:
+                    continue
             input = batch[0]
             labels = batch[1].to(self.device, dtype=torch.int64)
             for key in input.keys():
                 input[key] = input[key].to(self.device)
-            outputs = self.model(input_ids=input['input_ids'], attention_mask=input['attention_mask'], token_type_ids=input['token_type_ids'])
+            outputs = self.model(input_ids=input['input_ids'], 
+                                 attention_mask=input['attention_mask'], 
+                                 token_type_ids=input['token_type_ids']
+                                 )
             loss = self.criterion(outputs, labels)
             loss.backward()
             self.optimizer.step()
@@ -69,9 +76,7 @@ class Trainer():
                            'batch': i + 1, 
                            'training_loss': running_loss / self.logging_interval})                
                 running_loss = 0.0
-            if self.debug:
-                if i == 200:
-                    break
+            
            
 
     def test_fn(self, test_loader):
@@ -79,13 +84,18 @@ class Trainer():
         self.optimizer.eval()
         correct = 0
         total = 0
+        if self.conversion is None:
+            self.conversion = test_loader.dataset.conversion
         if self.conversion is not None:
             per_class = {self.conversion[i] : [0, 0] for i in range(len(self.conversion))}    
-        for batch in test_loader:
+        for i, batch in enumerate(test_loader):
             input = batch[0]
             for key in input.keys():
                 input[key] = input[key].to(self.device)
-            outputs = self.model(input_ids=input['input_ids'], attention_mask=input['attention_mask'], token_type_ids=input['token_type_ids'])
+            outputs = self.model(input_ids=input['input_ids'], 
+                                 attention_mask=input['attention_mask'], 
+                                 token_type_ids=input['token_type_ids']
+                                 )
             labels = batch[1].to(self.device, dtype=torch.int64)
             pred_prob = torch.log_softmax(outputs, dim=1)
             predicted = torch.argmax(pred_prob, dim=1)
@@ -107,6 +117,7 @@ class Trainer():
             for key in per_class:
                 print(f'{key}: {100 * per_class[key][0] / per_class[key][1]}')
                 wandb.log({f'{key}_accuracy': 100 * per_class[key][0] / per_class[key][1]})
+        
             
                 
         
@@ -116,20 +127,27 @@ class Trainer():
         correct = 0
         total = 0
         running_loss = 0.0
-        for batch in val_loader:
-            input = batch[0]
-            for key in input.keys():
-                input[key] = input[key].to(self.device)
-            outputs = self.model(input_ids=input['input_ids'], attention_mask=input['attention_mask'], token_type_ids=input['token_type_ids'])
-            labels = batch[1].to(self.device, dtype=torch.int64)
-            
-            running_loss += self.criterion(outputs, labels).item()
-            pred_prob = torch.log_softmax(outputs, dim=1)
-            predicted = torch.argmax(pred_prob, dim=1)
-            batch_y = labels
-            total += len(input['input_ids'])
-            correct += (predicted == batch_y).sum().item()
-            
+        with torch.no_grad():
+            for i, batch in tqdm(enumerate(val_loader)):
+                if self.debug:
+                    if i >= 20:
+                        continue
+                input = batch[0]
+                for key in input.keys():
+                    input[key] = input[key].to(self.device)
+                outputs = self.model(input_ids=input['input_ids'], 
+                                     attention_mask=input['attention_mask'], 
+                                     token_type_ids=input['token_type_ids']
+                                    )
+                labels = batch[1].to(self.device, dtype=torch.int64)
+                
+                running_loss += self.criterion(outputs, labels).item()
+                pred_prob = torch.log_softmax(outputs, dim=1)
+                predicted = torch.argmax(pred_prob, dim=1)
+                batch_y = labels
+                total += len(input['input_ids'])
+                correct += (predicted == batch_y).sum().item()
+                
         print(f'Top-1 Accuracy of the network on the validation set: {100 * correct / total}%')
         wandb.log({'validation_accuracy': 100 * correct / total,
                    'validation_loss' : running_loss / total,
@@ -138,6 +156,10 @@ class Trainer():
             self.best_val_loss = running_loss / total
             self.best_epoch = self.epoch
             self.save_best()
+            self.epochs_since_best = 0
+        else:
+            self.epochs_since_best += 1
+        
             
     def train_binary(self, train_loader):
         self.epoch += 1
@@ -148,10 +170,16 @@ class Trainer():
         running_loss = 0.0
         for i, batch in enumerate(tqdm(train_loader)):
             input = batch[0]
+            # print("GOT INPUT")
             labels = batch[1].to(self.device)
             for key in input.keys():
                 input[key] = input[key].to(self.device)
-            outputs = self.model(input_ids=input['input_ids'], attention_mask=input['attention_mask'], token_type_ids=input['token_type_ids']).squeeze()
+            # print("SET DEVICES")
+            outputs = self.model(input_ids=input['input_ids'], 
+                                 attention_mask=input['attention_mask'],
+                                 token_type_ids=input['token_type_ids']
+                                 ).squeeze()
+            # print("GOT OUTPUTS")
             if outputs.size() != labels.size():
                 print('squeezed labels')
                 labels = labels.squeeze()
@@ -180,20 +208,27 @@ class Trainer():
         preds = []
         if self.conversion is not None:
             per_class = {self.conversion[i] : [0, 0] for i in range(len(self.conversion))}    
-        for batch in test_loader:
-            input = batch[0]
-            for key in input:
-                input[key] = input[key].to(self.device)
-            labels = batch[1].to(self.device)
-            outputs = self.model(input_ids=input['input_ids'], attention_mask=input['attention_mask'], token_type_ids=input['token_type_ids']).squeeze()
-            pred_prob = F.sigmoid(outputs)
-            predicted = torch.tensor([1 if pred_prob[i] > 0.5 else 0 for i in range(len(pred_prob))]).to(self.device)
-            batch_y = labels
-            y_true.extend(batch_y.tolist())
-            pred_probs.extend(pred_prob.tolist())
-            preds.extend(predicted.tolist())
-            total += len(labels)
-            correct += (predicted == batch_y).sum().item()
+        with torch.no_grad():
+            for i, batch in enumerate(test_loader):
+                if self.debug:
+                    if i >= 20:
+                        continue
+                input = batch[0]
+                for key in input:
+                    input[key] = input[key].to(self.device)
+                labels = batch[1].to(self.device)
+                outputs = self.model(input_ids=input['input_ids'], 
+                                     attention_mask=input['attention_mask'], 
+                                     token_type_ids=input['token_type_ids']
+                                     ).squeeze()
+                pred_prob = F.sigmoid(outputs)
+                predicted = torch.tensor([1 if pred_prob[i] > 0.5 else 0 for i in range(len(pred_prob))]).to(self.device)
+                batch_y = labels
+                y_true.extend(batch_y.tolist())
+                pred_probs.extend(pred_prob.tolist())
+                preds.extend(predicted.tolist())
+                total += len(labels)
+                correct += (predicted == batch_y).sum().item()
         print(f'Binary Accuracy of the network on the test set: {100 * correct / total}%')
         print(f'ROC AUC Score: {roc_auc_score(y_true, pred_probs)}')
         cm = confusion_matrix(y_true, preds)
@@ -202,7 +237,7 @@ class Trainer():
                      'TPR': cm[1][1] / (cm[1][1] + cm[1][0]),
                      'FPR': cm[0][1] / (cm[0][1] + cm[0][0]),
                      'best_epoch': self.best_epoch})
-        # TODO: Implement per-class accuracy on the binary set (not sur if this is actually needed)
+        return (y_true, pred_probs)
                 
         
     def validate_binary(self, val_loader):
@@ -211,13 +246,19 @@ class Trainer():
         correct = 0
         total = 0
         running_loss = 0.0
-        for batch in val_loader:
+        for i, batch in enumerate(val_loader):
+            if self.debug:
+                if i >= 20:
+                    continue
             input = batch[0]
             for key in input:
                 input[key] = input[key].to(self.device)
             labels = batch[1].to(self.device)
             
-            outputs = self.model(input_ids=input['input_ids'], attention_mask=input['attention_mask'], token_type_ids=input['token_type_ids']).squeeze()
+            outputs = self.model(input_ids=input['input_ids'], 
+                                 attention_mask=input['attention_mask'], 
+                                 token_type_ids=input['token_type_ids']
+                                 ).squeeze()
             running_loss += self.criterion(outputs, labels).item()
             pred_prob = F.sigmoid(outputs)
             predicted = torch.tensor([1 if pred_prob[i] > 0.5 else 0 for i in range(len(pred_prob))]).to(self.device)
@@ -233,19 +274,39 @@ class Trainer():
             self.best_val_loss = running_loss / total
             self.best_epoch = self.epoch
             self.save_best()
+            self.epochs_since_best = 0
+        else:
+            self.epochs_since_best += 1
                     
     def save(self):
-        torch.save(self.model.state_dict(), os.path.join(self.save_path, f"model_{self.epoch}.pth"))
+        if isinstance(len(self.device_list) > 1):
+            print("SAVING FROM DP")
+            torch.save(self.model.module.state_dict(), os.path.join(self.save_path, f"model_{self.epoch}.pth"))
+        else:
+           torch.save(self.model.state_dict(), os.path.join(self.save_path, f"model_{self.epoch}.pth"))
         
     def save_best(self):
         if not os.path.exists(self.save_path):
             os.makedirs(self.save_path)
-        torch.save(self.model.state_dict(), os.path.join(self.save_path, 'best_model.pth'))
+        # self.save()
+        if len(self.device_list) > 1:
+            print("SAVING FROM DP")
+            torch.save(self.model.module.state_dict(), os.path.join(self.save_path, f"model_{self.epoch}.pth"))
+        else:
+           torch.save(self.model.state_dict(), os.path.join(self.save_path, f"model_{self.epoch}.pth"))
         
+                
     def load(self, epoch):
-        self.model.load_state_dict(torch.load(os.path.join(self.save_path, 'model_' + str(epoch) + '.pth')))
+        if len(self.device_list) > 1:
+            self.model.module.load_state_dict(torch.load(os.path.join(self.save_path, 'model_' + str(epoch) + '.pth')))
+        else:
+            self.model.load_state_dict(torch.load(os.path.join(self.save_path, 'model_' + str(epoch) + '.pth')))
         
     def load_best(self):
         print(f'loading best model at epoch {self.best_epoch}')
-        self.model.load_state_dict(torch.load(os.path.join(self.save_path,'best_model.pth')))
+        
+        if len(self.device_list) > 1:
+            self.model.module.load_state_dict(torch.load(os.path.join(self.save_path, 'best_model.pth')))
+        else:
+            self.model.load_state_dict(torch.load(os.path.join(self.save_path, 'best_model.pth')))
         

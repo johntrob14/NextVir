@@ -59,10 +59,10 @@ def mutate_read_indels(read, read_len, sub_rate, ins_rate, del_rate):
 
 def mutate_read(read, read_len, sub_rate, ins_rate, del_rate):
 
-    if len(read) < read_len:
-        raise ValueError("Read length is longer than input reads.")
-    elif len(read) == read_len and del_rate is not None:
-        raise ValueError("Read length is equal to input reads, cannot delete.")
+    # if len(read) < read_len:
+    #     raise ValueError("Read length is longer than input reads.")
+    # elif len(read) == read_len and del_rate is not None:
+    #     raise ValueError("Read length is equal to input reads, cannot delete.")
 
     bases = ['A', 'C', 'G', 'T']
 
@@ -83,18 +83,18 @@ def mutate_read(read, read_len, sub_rate, ins_rate, del_rate):
             ins = rn.choice(bases, size=len(read_arr), replace=True)
             ins_idx = np.nonzero(ins_mask)[0]  # indices of insertions
             read_arr = np.insert(read_arr, ins_idx, ins[ins_mask])
-
-        if len(read_arr) < read_len:  # Regenerate mutations if read is too short
-            continue
-        else:  # Mutations complete
-            break
+        break
+        # if len(read_arr) < read_len:  # Regenerate mutations if read is too short
+        #     continue
+        # else:  # Mutations complete
+        #     break
     
     mutated_read = ''.join(read_arr)
     if mutated_read not in read:
         is_mutated = True
         
-    start_idx = rn.randint(len(mutated_read) - read_len + 1)  # Randomly select read
-    return is_mutated, mutated_read[start_idx:start_idx+read_len]
+    # start_idx = rn.randint(len(mutated_read) - read_len + 1)  # Randomly select read
+    return is_mutated, mutated_read
 # 10% sub, 5% del, 5% ins
 
 if __name__ == "__main__":
@@ -113,7 +113,6 @@ if __name__ == "__main__":
                         is_mutated, mutated_read = mutate_read(
                             read, args.read_len, args.sub_rate, args.ins_rate, args.del_rate
                             )
-                    # Should we really do this while not is_mutated?- question for shorya
                 else:  # Do not mutate non-viral reads
                     mutated_read = read
                

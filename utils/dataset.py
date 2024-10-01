@@ -64,21 +64,34 @@ class TokenizedDataset(torch.utils.data.Dataset):
         self.reads = [None] * len(data)
         self.token_type_ids = [None] * len(data)
         self.attention_mask = [None] * len(data)
-        dvf_max_len = 363
+        dvf_max_len = 150
         self.labels = torch.Tensor(labels)
         # Tokenize loop, change getitem
         batch_size = 32
+        
         for i in range(0, len(data), batch_size):
             if i + batch_size > len(data):
                 reads = data[i:]
             else:
                 reads = data[i:i+batch_size]
-            tokenized = tokenizer(reads, return_tensors = 'pt', padding='max_length', max_length=75)
-            lens.append(tokenized['input_ids'].shape[1])
+            # for j in range(len(reads)):
+            #     if len(reads[j]) > dvf_max_len:
+            #         reads[j] = reads[j][:dvf_max_len]
+            tokenized = tokenizer(reads, return_tensors = 'pt', padding='max_length', 
+                                  max_length=151) # max_len=75 for D-S 150 for NT, 200 for Hyena?
+                
             for k in range(len(reads)):
+                # print(tokenized)
                 self.reads[i + k] = tokenized['input_ids'][k]
-                self.token_type_ids[i + k] = tokenized['token_type_ids'][k]
-                self.attention_mask[i + k] = tokenized['attention_mask'][k]
+                if 'token_type_ids' in tokenized:
+                    self.token_type_ids[i + k] = tokenized['token_type_ids'][k]
+                if 'attention_mask' in tokenized:
+                    self.attention_mask[i + k] = tokenized['attention_mask'][k]
+                    
+        if 'token_type_ids' not in tokenized:
+            self.token_type_ids = None
+        if 'attention_mask' not in tokenized:
+            self.attention_mask = None
                 
     def subsample_data(self, max_samples):
         per_class_lengths = [0] * len(self.conversion)
@@ -146,10 +159,10 @@ class TokenizedDataset(torch.utils.data.Dataset):
         
     def subsample_one_vs_all(self, label):
         for i in range(len(self.labels)):
-            if self.labels[i] == self.conversion.index(label):
-                self.labels[i] = 1.0
+            if self.labels[i].item() == self.conversion.index(label):
+                self.labels[i] = 1
             else:
-                self.labels[i] = 0.0
+                self.labels[i] = 0
                 
     def one_class_subsample(self, label):
         new_reads = []
@@ -169,9 +182,12 @@ class TokenizedDataset(torch.utils.data.Dataset):
         return len(self.reads)
     
     def __getitem__(self, index):
-        return {'input_ids': self.reads[index], 
-                'attention_mask': self.attention_mask[index],
-                'token_type_ids': self.token_type_ids[index]}, self.labels[index]
+        output_dict = {'input_ids': self.reads[index]}
+        if self.token_type_ids is not None:
+            output_dict['token_type_ids'] = self.token_type_ids[index]
+        if self.attention_mask is not None:
+            output_dict['attention_mask'] = self.attention_mask[index]
+        return output_dict, self.labels[index]
     
 
 def parse_fa(filename):
@@ -240,39 +256,53 @@ def load_dataset(filename):
 def parse_dataset(args, tokenizer, mode: str = 'train'):
     # Parse fasta datasets
     if mode == 'train':
-        data, bin_labels, (labels, conversion) = parse_multiclass_fa(args.train_path)
-        # conversion = ['HUM', 'HPV']
-        # data, bin_labels = parse_HPV_fa('./data/HPV/reads_150_train.fa')
+        if args.train_path == 'XVir':
+            conversion = ['HUM', 'HPV']
+            data, bin_labels = parse_HPV_fa('./data/HPV/reads_150_train.fa')
+        else:
+            data, bin_labels, (labels, conversion) = parse_multiclass_fa(args.train_path)
         #TODO -- add support for other datasets, file paths
         dataset = None
-        if not args.test:
-            if args.num_classes > 1 or args.single_label is not None:
-                dataset = TokenizedDataset(data, labels, tokenizer, conversion=conversion)
-                if args.single_label is not None and not args.one_vs_all:
-                    dataset.subsample_single(args.single_label)
-                elif args.single_label is not None and args.one_vs_all:
+        # if not args.test:
+        if args.num_classes > 1 or args.single_label is not None:
+            dataset = TokenizedDataset(data, labels, tokenizer, conversion=conversion)
+            if args.single_label is not None:
+                if args.one_vs_all:
                     dataset.subsample_one_vs_all(args.single_label)
-            else:
-                dataset = TokenizedDataset(data, bin_labels, tokenizer, conversion=conversion)
-            print("training class spread: ", torch.unique(dataset.labels, return_counts=True))
+                elif args.remove_single:
+                    dataset.remove_single(args.single_label)
+                else:
+                    dataset.subsample_single(args.single_label)
+        else:
+            dataset = TokenizedDataset(data, bin_labels, tokenizer, conversion=conversion)
+        print("training class spread: ", torch.unique(dataset.labels, return_counts=True))
         args.conversion = conversion
     elif mode == 'val':
         conversion = args.conversion
-        data, bin_labels, (labels, _) = parse_multiclass_fa(args.val_path, class_names=conversion)
-        # data, bin_labels = parse_HPV_fa('./data/HPV/reads_150_valid.fa')
+        
+        if args.train_path == 'XVir':
+            data, bin_labels = parse_HPV_fa('./data/HPV/reads_150_valid.fa')
+        else:
+            data, bin_labels, (labels, _) = parse_multiclass_fa(args.val_path, class_names=conversion)
         if args.num_classes > 1 or args.single_label is not None:
             dataset = TokenizedDataset(data, labels, tokenizer, conversion=conversion)
-            if args.single_label is not None and not args.one_vs_all:
-                dataset.subsample_single(args.single_label)
-            elif args.single_label is not None and args.one_vs_all:
-                dataset.subsample_one_vs_all(args.single_label)
+            if args.single_label is not None:
+                if args.remove_single:
+                    dataset.remove_single(args.single_label)
+                elif args.one_vs_all:
+                    dataset.subsample_one_vs_all(args.single_label)
+                else:
+                    dataset.subsample_single(args.single_label)
         else:
             dataset = TokenizedDataset(data, bin_labels, tokenizer, conversion=conversion)
     elif mode == 'test':
         conversion = args.conversion
         # this is where I'll have to add a bit of extra functionality
-        data, bin_labels, (labels, _) = parse_multiclass_fa(args.test_path, class_names=conversion)
-        # data, bin_labels = parse_HPV_fa('./data/HPV/reads_150_test.fa')
+        if args.train_path == 'XVir':
+            data, bin_labels = parse_HPV_fa('./data/HPV/reads_150_test.fa')
+        else:
+            data, bin_labels, (labels, _) = parse_multiclass_fa(args.test_path, class_names=conversion)
+
         if args.num_classes > 1 or args.single_label is not None:
             dataset = TokenizedDataset(data, labels, tokenizer, conversion=conversion)
             if args.single_label is not None:
