@@ -1,6 +1,8 @@
 __pycache__/
-data/
 models/
 !models/best_model.pth
 wandb/
 *.sh
+
+data/
+!data/*.sh
