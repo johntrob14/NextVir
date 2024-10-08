@@ -13,12 +13,21 @@ def main(args):
     torch.manual_seed(args.seed)
     
     # Initialize Tokenizer and Base Model
-    tokenizer = AutoTokenizer.from_pretrained("zhihan1996/DNABERT-S", trust_remote_code=True)
-    model = AutoModel.from_pretrained("zhihan1996/DNABERT-S", trust_remote_code=True)     
-    # tokenizer = AutoTokenizer.from_pretrained("InstaDeepAI/nucleotide-transformer-v2-500m-multi-species", trust_remote_code=True)
-    # model = AutoModelForMaskedLM.from_pretrained("InstaDeepAI/nucleotide-transformer-v2-500m-multi-species", trust_remote_code=True)
-    # tokenizer = AutoTokenizer.from_pretrained('LongSafari/hyenadna-large-1m-seqlen-hf', trust_remote_code=True)
-    # model = AutoModelForSequenceClassification.from_pretrained('LongSafari/hyenadna-large-1m-seqlen-hf', trust_remote_code=True)
+    args.mpodel = args.model.lower()
+    match args.model:
+        case 'dnabert-s':
+            tokenizer = AutoTokenizer.from_pretrained("zhihan1996/DNABERT-S", trust_remote_code=True)
+            model = AutoModel.from_pretrained("zhihan1996/DNABERT-S", trust_remote_code=True)
+        case 'nt':     
+            tokenizer = AutoTokenizer.from_pretrained("InstaDeepAI/nucleotide-transformer-v2-500m-multi-species", trust_remote_code=True)
+            model = AutoModelForMaskedLM.from_pretrained("InstaDeepAI/nucleotide-transformer-v2-500m-multi-species", trust_remote_code=True)
+        case 'hyenadna':
+            tokenizer = AutoTokenizer.from_pretrained('LongSafari/hyenadna-large-1m-seqlen-hf', trust_remote_code=True)
+            model = AutoModelForSequenceClassification.from_pretrained('LongSafari/hyenadna-large-1m-seqlen-hf', trust_remote_code=True)
+        case _:
+            print("Model not found. Please check the model name. Defaulting to DNABERT-S")
+            tokenizer = AutoTokenizer.from_pretrained("zhihan1996/DNABERT-S", trust_remote_code=True)
+            model = AutoModel.from_pretrained("zhihan1996/DNABERT-S", trust_remote_code=True)
     
     training_dataset = parse_dataset(args, tokenizer)
     
@@ -29,15 +38,17 @@ def main(args):
     batch_size = args.batch_size
     device_list = list(map(int, args.device.split(',')))
     args.main_device = 'cuda:' + str(device_list[0]) # add to args for ease of use
+    print('Main Device: ', args.main_device)
     # args.main_device = 'cpu'
     if args.verbose:
         print(device_list)
     
     model, parameters = get_stack(model, args)
-        
+    model = model.to(args.main_device)    
 
     if len(device_list) > 1:
         model = torch.nn.DataParallel(model, device_ids=device_list)
+        # model = model.to(args.main_device)
     if args.test:
         # model.load_state_dict(torch.load(args.model_path, map_location=device_list))
         # print('Loaded model from: ', args.model_path)

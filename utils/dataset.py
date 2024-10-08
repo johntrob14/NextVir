@@ -3,68 +3,26 @@ import numpy as np
 from transformers import AutoTokenizer, AutoModel
 import pickle
 from argparse import ArgumentParser
-
-class EmbedDataset(torch.utils.data.Dataset):
-    
-    def __init__(self, data=None, labels=None, tokenizer=None, model=None, filename=None, conversion=None):
-        if data is None or labels is None or tokenizer is None or model is None:
-            raise ValueError('Must provide either data, labels, tokenizer, and model or a filename')
-        lens = []
-        model.to('cuda:3')
-        # self.reads = torch.zeros(len(data), 768*363)
-        self.reads = torch.zeros(len(data), 768)
-        
-        self.conversion = conversion
-        dvf_max_len = 363
-        self.labels = torch.Tensor(labels)
-        # Tokenize loop, change getitem
-        batch_size = 128
-        for i in range(0, len(data), batch_size):
-            if i + batch_size > len(data):
-                reads = data[i:]
-            else:
-                reads = data[i:i+batch_size]
-            tokenized = tokenizer(reads, return_tensors = 'pt', padding='longest', max_length=dvf_max_len)['input_ids']
-            lens.append(tokenized.shape[1])
-            tokenized = tokenized.to('cuda:3')
-            embedded = model(tokenized)[0]
-            # pooled = torch.flatten(embedded, start_dim=1).cpu().detach()
-            pooled = embedded.mean(dim=1).cpu().detach()
-            for k in range(len(reads)):
-                self.reads[i + k] = pooled[k]
-            del embedded, tokenized
-    
-        
-    def subsample_data(self, max_samples):
-        per_class_lengths = [0] * len(self.conversion)
-        new_reads = []
-        new_labels = []
-        for i in range(len(self.reads)):
-            if per_class_lengths[int(self.labels[i].argmax())] < max_samples:
-                per_class_lengths[int(self.labels[i].argmax())] += 1
-                new_reads.append(self.reads[i])
-                new_labels.append(self.labels[i])
-        self.reads = torch.stack(new_reads)
-        self.labels = torch.stack(new_labels)
-        print(per_class_lengths)
-                
-            
-        
-        
-    def __len__(self):
-        return len(self.reads)
-    
-    def __getitem__(self, index):
-        return {'embedding': self.reads[index], 'labels' : self.labels[index]}
     
 class TokenizedDataset(torch.utils.data.Dataset):
-    def __init__(self, data, labels, tokenizer, conversion=None):
+    def __init__(self, data, labels, tokenizer, conversion=None, args=None):
         self.conversion = conversion
         lens = []
         self.reads = [None] * len(data)
         self.token_type_ids = [None] * len(data)
         self.attention_mask = [None] * len(data)
-        dvf_max_len = 150
+        if args:
+            match args.model:
+                case 'dnabert-s':
+                    max_len = 75
+                case 'nt':
+                    max_len = 150
+                case 'hyenadna':
+                    max_len = 151
+                case _:
+                    max_len = 75
+        else:
+            max_len = 75
         self.labels = torch.Tensor(labels)
         # Tokenize loop, change getitem
         batch_size = 32
@@ -74,11 +32,11 @@ class TokenizedDataset(torch.utils.data.Dataset):
                 reads = data[i:]
             else:
                 reads = data[i:i+batch_size]
-            # for j in range(len(reads)):
-            #     if len(reads[j]) > dvf_max_len:
-            #         reads[j] = reads[j][:dvf_max_len]
+            for j in range(len(reads)):
+                if len(reads[j]) > max_len:
+                    reads[j] = reads[j][:max_len]
             tokenized = tokenizer(reads, return_tensors = 'pt', padding='max_length', 
-                                  max_length=151) # max_len=75 for D-S 150 for NT, 200 for Hyena?
+                                  max_length=max_len) # max_len=75 for D-S 150 for NT, 151 for H-DNA
                 
             for k in range(len(reads)):
                 # print(tokenized)
@@ -117,15 +75,17 @@ class TokenizedDataset(torch.utils.data.Dataset):
         for i in range(len(self.reads)):
             if self.labels[i] != self.conversion.index(label):
                 new_reads.append(self.reads[i])
-                new_attention_mask.append(self.attention_mask[i])
-                new_token_type_ids.append(self.token_type_ids[i])
+                if self.attention_mask is not None:
+                    new_attention_mask.append(self.attention_mask[i])
+                if self.token_type_ids is not None:
+                    new_token_type_ids.append(self.token_type_ids[i])
                 new_labels.append(0.0 if self.labels[i] == 0 else 1.0)
             else:
                 num_removed += 1
         print(num_removed)
         self.reads = torch.stack(new_reads)
-        self.attention_mask = torch.stack(new_attention_mask)
-        self.token_type_ids = torch.stack(new_token_type_ids)
+        self.attention_mask = torch.stack(new_attention_mask) if self.attention_mask is not None else None
+        self.token_type_ids = torch.stack(new_token_type_ids) if self.token_type_ids is not None else None
         self.labels = torch.Tensor(new_labels)
         
     def subsample_single(self, label):
@@ -138,23 +98,27 @@ class TokenizedDataset(torch.utils.data.Dataset):
         for i in range(len(self.reads)):
             if self.labels[i] == self.conversion.index(label):
                 new_reads.append(self.reads[i])
-                new_attention_mask.append(self.attention_mask[i])
-                new_token_type_ids.append(self.token_type_ids[i])
+                if self.attention_mask is not None:
+                    new_attention_mask.append(self.attention_mask[i])
+                if self.token_type_ids is not None:
+                    new_token_type_ids.append(self.token_type_ids[i])
                 new_labels.append(1.0)
         vir_len = len(new_reads)
         hum_len = 0
         for i in range(len(self.reads)):
             if self.labels[i] == 0:
                 new_reads.append(self.reads[i])
-                new_attention_mask.append(self.attention_mask[i])
-                new_token_type_ids.append(self.token_type_ids[i])
+                if self.attention_mask is not None:
+                    new_attention_mask.append(self.attention_mask[i])
+                if self.token_type_ids is not None:
+                    new_token_type_ids.append(self.token_type_ids[i])
                 new_labels.append(0.0)
                 hum_len += 1
                 if hum_len >= vir_len:
                     break
         self.reads = torch.stack(new_reads)
-        self.attention_mask = torch.stack(new_attention_mask)
-        self.token_type_ids = torch.stack(new_token_type_ids)
+        self.attention_mask = torch.stack(new_attention_mask) if self.attention_mask is not None else None
+        self.token_type_ids = torch.stack(new_token_type_ids) if self.token_type_ids is not None else None
         self.labels = torch.Tensor(new_labels)
         
     def subsample_one_vs_all(self, label):
@@ -171,11 +135,13 @@ class TokenizedDataset(torch.utils.data.Dataset):
         for i in range(len(self.labels)):
             if self.labels[i] == self.conversion.index(label):
                 new_reads.append(self.reads[i])
-                new_attention_mask.append(self.attention_mask[i])
-                new_token_type_ids.append(self.token_type_ids[i])
+                if self.attention_mask is not None:
+                    new_attention_mask.append(self.attention_mask[i])
+                if self.token_type_ids is not None:
+                    new_token_type_ids.append(self.token_type_ids[i])
         self.reads = torch.stack(new_reads)
-        self.attention_mask = torch.stack(new_attention_mask)
-        self.token_type_ids = torch.stack(new_token_type_ids)
+        self.attention_mask = torch.stack(new_attention_mask) if self.attention_mask is not None else None
+        self.token_type_ids = torch.stack(new_token_type_ids) if self.token_type_ids is not None else None
         self.labels = torch.ones(len(new_reads))
 
     def __len__(self):

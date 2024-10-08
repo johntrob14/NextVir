@@ -14,7 +14,7 @@ def get_stack(model, args):
             print('Pre-LoRA:')  
             print(model)
             
-        set_lora(model)
+        set_lora(model, args.rank)
         if args.verbose:
             print('Post-LoRA:')
             print(model)   
@@ -24,16 +24,21 @@ def get_stack(model, args):
             lora_names = [name for name, param in model.named_parameters() if 'lora' in name]
             print('LoRA Parameters:')
             print(lora_names)
-    
+    match args.model:
+        case 'dnabert-s':
+            latent_dim = 768
+        case 'nt':     
+            latent_dim = 1024
+        case 'hyenadna':
+            latent_dim = 256
+        case _:
+            latent_dim = 768
     #Get adapter ready
     if args.num_classes == 1:
-        adapter = BinClassifier(768)
-        # adapter = BinClassifier(1024)
-        # adapter = BinClassifier(256)
+        adapter = BinClassifier(latent_dim)
     else:
-        adapter = MultiClassifier(768, num_classes=args.num_classes)
-        # adapter = MultiClassifier(1024, num_classes=args.num_classes)
-        # adapter = MultiClassifier(256, num_classes=args.num_classes)
+        adapter = MultiClassifier(latent_dim, num_classes=args.num_classes)
+        
     for param in adapter.parameters():
         param.requires_grad = True    
 
@@ -44,7 +49,7 @@ def get_stack(model, args):
     else:
         parameters = [{"params" : adapter.parameters(), "lr": args.lr}]
         
-    return AdapterStack(model, adapter).to(args.main_device), parameters
+    return AdapterStack(model, adapter, args), parameters
 
 def get_criterion(args, training_dataset):
     if args.num_classes == 1:
@@ -77,6 +82,7 @@ def parse_args(opt: ArgumentParser):
     opt.add_argument('--weight_decay', type=float, default=0.005)
     opt.add_argument('--batch_size', type=int, default=128)
     opt.add_argument('--lr', type=float, default=1e-3)
+    opt.add_argument('-r', '--rank', type=int, default=4, help='Rank of LoRA matrices (Default 4)')
     opt.add_argument('--num_epochs', type=int, default=15)
     opt.add_argument('--embedding_only', action='store_true')
     opt.add_argument('--unweighted_loss', action='store_true')
@@ -97,7 +103,8 @@ def parse_args(opt: ArgumentParser):
     opt.add_argument('-i', '--train_path', type=str, default='./data/150bp_multiviral_train.fa')
     opt.add_argument('-v', '--val_path', type=str, default='./data/150bp_multiviral_val.fa')
     opt.add_argument('-t', '--test_path', type=str, default='./data/150bp_multiviral_test.fa')
-    opt.add_argument('-m', '--model_path', type=str, default='./models/best_model.pth')
+    opt.add_argument('-mo', '--model_path', type=str, default='./models/best_model.pth')
+    opt.add_argument('-m', '--model', type=str, default='dnabert-s', help='Model to use for training. Options: DNABERT-S (Default), NT, hyenaDNA')
     args=opt.parse_args()
     config = {
         'device': args.device,

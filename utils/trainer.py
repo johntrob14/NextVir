@@ -58,14 +58,29 @@ class Trainer():
             if self.debug:
                 if i >= 20:
                     continue
-            input = batch[0]
+            input  = batch[0]
             labels = batch[1].to(self.device, dtype=torch.int64)
             for key in input.keys():
                 input[key] = input[key].to(self.device)
-            outputs = self.model(input_ids=input['input_ids'], 
-                                 attention_mask=input['attention_mask'], 
-                                 token_type_ids=input['token_type_ids']
-                                 )
+            match self.args.model:
+                case 'dnabert-s':
+                    outputs = self.model(input_ids=input['input_ids'], 
+                                        attention_mask=input['attention_mask'], 
+                                        token_type_ids=input['token_type_ids']
+                                        )
+                case 'nt':
+                    outputs = self.model(input_ids=input['input_ids'], 
+                                        attention_mask=input['attention_mask']
+                                        )
+                case 'hyenadna':
+                    # print(input['input_ids'].device)
+                    # self.model = self.model.to(self.device)
+                    outputs = self.model(input_ids=input['input_ids'])
+                case _:
+                    outputs = self.model(input_ids=input['input_ids'], 
+                                        attention_mask=input['attention_mask'], 
+                                        token_type_ids=input['token_type_ids']
+                                        )
             loss = self.criterion(outputs, labels)
             loss.backward()
             self.optimizer.step()
@@ -87,27 +102,41 @@ class Trainer():
         if self.conversion is None:
             self.conversion = test_loader.dataset.conversion
         if self.conversion is not None:
-            per_class = {self.conversion[i] : [0, 0] for i in range(len(self.conversion))}    
-        for i, batch in enumerate(test_loader):
-            input = batch[0]
-            for key in input.keys():
-                input[key] = input[key].to(self.device)
-            outputs = self.model(input_ids=input['input_ids'], 
-                                 attention_mask=input['attention_mask'], 
-                                 token_type_ids=input['token_type_ids']
-                                 )
-            labels = batch[1].to(self.device, dtype=torch.int64)
-            pred_prob = torch.log_softmax(outputs, dim=1)
-            predicted = torch.argmax(pred_prob, dim=1)
-            batch_y = labels
-            if self.conversion is not None:
-                for i in range(len(batch_y)):
-                    per_class[self.conversion[batch_y[i]]][1] += 1
-                    if predicted[i] == batch_y[i]:
-                        per_class[self.conversion[batch_y[i]]][0] += 1
-            total += len(input['input_ids'])
-            correct += (predicted == batch_y).sum().item()
-        
+            per_class = {self.conversion[i] : [0, 0] for i in range(len(self.conversion))} 
+        with torch.no_grad():   
+            for i, batch in enumerate(test_loader):
+                input = batch[0]
+                for key in input.keys():
+                    input[key] = input[key].to(self.device)
+                match self.args.model:
+                    case 'dnabert-s':
+                        outputs = self.model(input_ids=input['input_ids'], 
+                                            attention_mask=input['attention_mask'], 
+                                            token_type_ids=input['token_type_ids']
+                                            )
+                    case 'nt':
+                        outputs = self.model(input_ids=input['input_ids'], 
+                                            attention_mask=input['attention_mask']
+                                            )
+                    case 'hyenadna':
+                        outputs = self.model(input_ids=input['input_ids'])
+                    case _:
+                        outputs = self.model(input_ids=input['input_ids'], 
+                                            attention_mask=input['attention_mask'], 
+                                            token_type_ids=input['token_type_ids']
+                                            )
+                labels = batch[1].to(self.device, dtype=torch.int64)
+                pred_prob = torch.log_softmax(outputs, dim=1)
+                predicted = torch.argmax(pred_prob, dim=1)
+                batch_y = labels
+                if self.conversion is not None:
+                    for i in range(len(batch_y)):
+                        per_class[self.conversion[batch_y[i]]][1] += 1
+                        if predicted[i] == batch_y[i]:
+                            per_class[self.conversion[batch_y[i]]][0] += 1
+                total += len(input['input_ids'])
+                correct += (predicted == batch_y).sum().item()
+            
         print(f'Top-1 Accuracy of the network on the test set: {100 * correct / total}%')
         wandb.log({'test_accuracy': 100 * correct / total,
                    'best_epoch': self.best_epoch})
@@ -135,10 +164,23 @@ class Trainer():
                 input = batch[0]
                 for key in input.keys():
                     input[key] = input[key].to(self.device)
-                outputs = self.model(input_ids=input['input_ids'], 
-                                     attention_mask=input['attention_mask'], 
-                                     token_type_ids=input['token_type_ids']
-                                    )
+                match self.args.model:
+                    case 'dnabert-s':
+                        outputs = self.model(input_ids=input['input_ids'], 
+                                            attention_mask=input['attention_mask'], 
+                                            token_type_ids=input['token_type_ids']
+                                            )
+                    case 'nt':
+                        outputs = self.model(input_ids=input['input_ids'], 
+                                            attention_mask=input['attention_mask']
+                                            )
+                    case 'hyenadna':
+                        outputs = self.model(input_ids=input['input_ids'])
+                    case _:
+                        outputs = self.model(input_ids=input['input_ids'], 
+                                            attention_mask=input['attention_mask'], 
+                                            token_type_ids=input['token_type_ids']
+                                            )
                 labels = batch[1].to(self.device, dtype=torch.int64)
                 
                 running_loss += self.criterion(outputs, labels).item()
@@ -170,16 +212,27 @@ class Trainer():
         running_loss = 0.0
         for i, batch in enumerate(tqdm(train_loader)):
             input = batch[0]
-            # print("GOT INPUT")
             labels = batch[1].to(self.device)
             for key in input.keys():
                 input[key] = input[key].to(self.device)
-            # print("SET DEVICES")
-            outputs = self.model(input_ids=input['input_ids'], 
-                                 attention_mask=input['attention_mask'],
-                                 token_type_ids=input['token_type_ids']
-                                 ).squeeze()
-            # print("GOT OUTPUTS")
+            match self.args.model:
+                case 'dnabert-s':
+                    outputs = self.model(input_ids=input['input_ids'], 
+                                        attention_mask=input['attention_mask'], 
+                                        token_type_ids=input['token_type_ids']
+                                        )
+                case 'nt':
+                    outputs = self.model(input_ids=input['input_ids'], 
+                                        attention_mask=input['attention_mask']
+                                        )
+                case 'hyenadna':
+                    outputs = self.model(input_ids=input['input_ids'])
+                case _:
+                    outputs = self.model(input_ids=input['input_ids'], 
+                                        attention_mask=input['attention_mask'], 
+                                        token_type_ids=input['token_type_ids']
+                                        )
+            outputs = outputs.squeeze()
             if outputs.size() != labels.size():
                 print('squeezed labels')
                 labels = labels.squeeze()
@@ -217,10 +270,24 @@ class Trainer():
                 for key in input:
                     input[key] = input[key].to(self.device)
                 labels = batch[1].to(self.device)
-                outputs = self.model(input_ids=input['input_ids'], 
-                                     attention_mask=input['attention_mask'], 
-                                     token_type_ids=input['token_type_ids']
-                                     ).squeeze()
+                match self.args.model:
+                    case 'dnabert-s':
+                        outputs = self.model(input_ids=input['input_ids'], 
+                                            attention_mask=input['attention_mask'], 
+                                            token_type_ids=input['token_type_ids']
+                                            )
+                    case 'nt':
+                        outputs = self.model(input_ids=input['input_ids'], 
+                                            attention_mask=input['attention_mask']
+                                            )
+                    case 'hyenadna':
+                        outputs = self.model(input_ids=input['input_ids'])
+                    case _:
+                        outputs = self.model(input_ids=input['input_ids'], 
+                                            attention_mask=input['attention_mask'], 
+                                            token_type_ids=input['token_type_ids']
+                                            )
+                outputs = outputs.squeeze()
                 pred_prob = F.sigmoid(outputs)
                 predicted = torch.tensor([1 if pred_prob[i] > 0.5 else 0 for i in range(len(pred_prob))]).to(self.device)
                 batch_y = labels
@@ -246,26 +313,41 @@ class Trainer():
         correct = 0
         total = 0
         running_loss = 0.0
-        for i, batch in enumerate(val_loader):
-            if self.debug:
-                if i >= 20:
-                    continue
-            input = batch[0]
-            for key in input:
-                input[key] = input[key].to(self.device)
-            labels = batch[1].to(self.device)
-            
-            outputs = self.model(input_ids=input['input_ids'], 
-                                 attention_mask=input['attention_mask'], 
-                                 token_type_ids=input['token_type_ids']
-                                 ).squeeze()
-            running_loss += self.criterion(outputs, labels).item()
-            pred_prob = F.sigmoid(outputs)
-            predicted = torch.tensor([1 if pred_prob[i] > 0.5 else 0 for i in range(len(pred_prob))]).to(self.device)
-            batch_y = labels
-            total += len(labels)
-            correct += (predicted == batch_y).sum().item()
-            
+        with torch.no_grad():
+            for i, batch in enumerate(val_loader):
+                if self.debug:
+                    if i >= 20:
+                        continue
+                input = batch[0]
+                for key in input:
+                    input[key] = input[key].to(self.device)
+                labels = batch[1].to(self.device)
+                
+                match self.args.model:
+                    case 'dnabert-s':
+                        outputs = self.model(input_ids=input['input_ids'], 
+                                            attention_mask=input['attention_mask'], 
+                                            token_type_ids=input['token_type_ids']
+                                            )
+                    case 'nt':
+                        outputs = self.model(input_ids=input['input_ids'], 
+                                            attention_mask=input['attention_mask']
+                                            )
+                    case 'hyenadna':
+                        outputs = self.model(input_ids=input['input_ids'])
+                    case _:
+                        outputs = self.model(input_ids=input['input_ids'], 
+                                            attention_mask=input['attention_mask'], 
+                                            token_type_ids=input['token_type_ids']
+                                            )
+                outputs = outputs.squeeze()
+                running_loss += self.criterion(outputs, labels).item()
+                pred_prob = F.sigmoid(outputs)
+                predicted = torch.tensor([1 if pred_prob[i] > 0.5 else 0 for i in range(len(pred_prob))]).to(self.device)
+                batch_y = labels
+                total += len(labels)
+                correct += (predicted == batch_y).sum().item()
+                
         print(f'Binary Accuracy of the network on the validation set: {100 * correct / total}%')
         wandb.log({'validation_accuracy': 100 * correct / total,
                    'validation_loss' : running_loss / total,

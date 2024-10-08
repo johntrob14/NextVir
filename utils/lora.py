@@ -6,17 +6,16 @@ import torch.nn.functional as F
 from torch.nn.utils.parametrize import register_parametrization
 
 from einops import rearrange
-#TODO: Add support for command line rank change
-def set_lora(model):
+def set_lora(model, rank: int = 4):
     for name, module in model.named_children():
         if 'Wqkv' in name:
-            register_parametrization(module, 'weight', LoRaModule(*module.weight.shape, split_dimension=3, rank=4, device=module.weight.device))
+            register_parametrization(module, 'weight', LoRaModule(*module.weight.shape, split_dimension=3, rank=rank, device=module.weight.device))
         elif isinstance(module, torch.nn.Dropout):
             module.p = 0.0
         elif isinstance(module, torch.nn.Linear):
             if 'pooler' in name:
                 continue
-            register_parametrization(module, 'weight', LoRaModule(*module.weight.shape, rank=4, device=module.weight.device))
+            register_parametrization(module, 'weight', LoRaModule(*module.weight.shape, rank=rank, device=module.weight.device))
         else:
             set_lora(module)
 
