@@ -4,7 +4,7 @@ As of 9/30, this repository has been made public for the submission of our manus
 ## Requirements
 Please use conda to install the main requirements. You may need to change the version of pytorch and/or HuggingFace depending on your hardware. All experiments were performed without triton, which may install automatically.
 
-All experiments were performed using AMD Vega 20 GPUs. Support for mps and cpu backend is coming soon, but expect to need at least 8Gb of VRAM.
+All experiments were performed using AMD Vega 20 GPUs.
 
 The primary dataset for the experiments in the manuscript are available at https://zenodo.org/records/13922061. The 'disjoint' set refers to the context-supported dataset which seperated the reads in the train/test/val based on their location in the reference genome.
 
